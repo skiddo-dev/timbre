@@ -3,9 +3,27 @@
 	import { goto } from '$app/navigation';
 	import { player } from '$lib/audio/player.svelte';
 	import { formatDuration, qualityLabel } from '$lib/format';
+	import { ambientColor } from '$lib/ambient';
 	import Cover from './Cover.svelte';
 
 	let showQueue = $state(false);
+
+	// the dock breathes with the current track's cover colour
+	let art = $state('var(--accent-rgb)');
+	$effect(() => {
+		const id = player.current?.albumId;
+		if (id == null) {
+			art = 'var(--accent-rgb)';
+			return;
+		}
+		let live = true;
+		ambientColor(id).then((rgb) => {
+			if (live) art = rgb;
+		});
+		return () => {
+			live = false;
+		};
+	});
 
 	onMount(() => {
 		player.hydrate();
@@ -30,6 +48,21 @@
 	const cur = $derived(player.current);
 	const pct = $derived(player.durationMs > 0 ? (player.positionMs / player.durationMs) * 100 : 0);
 
+	const khz = (n: number) => (n / 1000).toFixed(1).replace(/\.0$/, '');
+	const rateText = $derived.by(() => {
+		const s = player.sourceRate;
+		if (!s) return '';
+		if (player.outputRate === 0) return `${khz(s)} kHz`;
+		return player.rateMatched ? `${khz(s)} kHz · exact` : `${khz(s)} → ${khz(player.outputRate)} kHz`;
+	});
+	const bpTitle = $derived(
+		player.outputRate === 0
+			? 'Bit-perfect armed — press play to read your output device rate'
+			: player.rateMatched
+				? 'Bit-perfect: output device matches the source rate — no resampling'
+				: `Resampling: set your OS output device to ${khz(player.sourceRate)} kHz to be bit-perfect`
+	);
+
 	// waveform overview (computed by the loudness WASM kernel), fetched per track
 	let waveform = $state<number[]>([]);
 	$effect(() => {
@@ -51,7 +84,7 @@
 	});
 </script>
 
-<div class="dock" class:idle={!cur}>
+<div class="dock" class:idle={!cur} style:--art={art}>
 	{#if cur}
 		<div class="track">
 			<a href={`/albums/${cur.albumId}`} class="art"><Cover albumId={cur.albumId} alt={cur.title} /></a>
@@ -107,7 +140,24 @@
 
 		<div class="right">
 			<span class="chip">{qualityLabel(cur)}</span>
-			<button class="ico" class:active={player.leveling} onclick={() => player.toggleLeveling()} title="Volume leveling (ReplayGain)">⚖</button>
+			{#if player.bitPerfect}
+				<span
+					class="chip bp-stat"
+					class:ok={player.rateMatched}
+					class:warn={player.outputRate > 0 && !player.rateMatched}
+					title={bpTitle}>{rateText}</span>
+			{/if}
+			<button
+				class="ico"
+				class:active={player.bitPerfect}
+				onclick={() => player.toggleBitPerfect()}
+				title="Bit-perfect output — bypass app volume & ReplayGain leveling; match your OS device to the track rate">◎</button>
+			<button
+				class="ico"
+				class:active={player.leveling}
+				disabled={player.bitPerfect}
+				onclick={() => player.toggleLeveling()}
+				title={player.bitPerfect ? 'Leveling is off in bit-perfect mode' : 'Volume leveling (ReplayGain)'}>⚖</button>
 			<button class="ico" class:active={showQueue} onclick={() => (showQueue = !showQueue)} title="Queue">≣</button>
 			<div class="vol">
 				<span class="ico-static">🔈</span>
@@ -117,6 +167,10 @@
 					max="1"
 					step="0.01"
 					value={player.volume}
+					disabled={player.bitPerfect}
+					title={player.bitPerfect
+						? 'Volume is at unity in bit-perfect mode — use your hardware/OS volume'
+						: 'Volume'}
 					oninput={(e) => player.setVolume(+(e.currentTarget as HTMLInputElement).value)}
 				/>
 			</div>
@@ -164,10 +218,15 @@
 		align-items: center;
 		gap: 1rem;
 		padding: 0 1.4rem;
-		background: color-mix(in srgb, var(--surface) 92%, transparent);
-		backdrop-filter: blur(14px);
+		/* a soft wash of the current cover's colour rises from the left, over glass */
+		background:
+			linear-gradient(90deg, rgb(var(--art) / 0.14), rgb(var(--art) / 0.03) 38%, transparent 60%),
+			color-mix(in srgb, var(--surface) 88%, transparent);
+		backdrop-filter: blur(18px) saturate(1.2);
 		border-top: 1px solid var(--border);
+		box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04) inset, 0 -18px 40px -30px rgb(var(--art) / 0.5);
 		z-index: 30;
+		transition: background 0.6s ease;
 	}
 	.dock.idle {
 		grid-template-columns: 1fr;
@@ -188,7 +247,11 @@
 		flex: none;
 		border-radius: var(--radius-sm);
 		overflow: hidden;
-		box-shadow: var(--shadow-sm);
+		box-shadow: var(--shadow-sm), 0 0 0 1px rgb(var(--art) / 0.3), 0 6px 20px -8px rgb(var(--art) / 0.55);
+		transition: box-shadow 0.6s ease, transform 0.15s ease;
+	}
+	.art:hover {
+		transform: translateY(-1px);
 	}
 	.meta {
 		min-width: 0;
@@ -219,10 +282,10 @@
 	}
 	.eq span {
 		width: 3px;
-		background: var(--accent);
+		background: rgb(var(--art));
 		border-radius: 2px;
 		height: 20%;
-		transition: height 0.08s linear;
+		transition: height 0.08s linear, background 0.6s ease;
 	}
 
 	.center {
@@ -253,22 +316,53 @@
 	.ico.active {
 		color: var(--accent);
 	}
+	.ico:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+	.ico:disabled:hover {
+		color: var(--text-dim);
+		background: none;
+	}
 	.ico.sm {
 		font-size: 0.78rem;
 	}
+
+	.bp-stat {
+		font-size: 0.7rem;
+		border: 1px solid var(--border);
+	}
+	.bp-stat.ok {
+		color: var(--accent);
+		border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+	}
+	.bp-stat.warn {
+		color: var(--warn, #d08770);
+		border-color: color-mix(in srgb, var(--warn, #d08770) 45%, transparent);
+	}
+	.vol input:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
 	.play {
-		background: var(--accent);
+		background: radial-gradient(circle at 50% 30%, var(--accent-strong), var(--accent));
 		color: var(--accent-contrast);
 		border: none;
-		width: 36px;
-		height: 36px;
+		width: 38px;
+		height: 38px;
 		border-radius: 50%;
 		font-size: 1rem;
 		display: grid;
 		place-items: center;
+		box-shadow: 0 2px 12px -2px rgba(224, 164, 92, 0.6), 0 1px 0 rgba(255, 255, 255, 0.25) inset;
+		transition: transform 0.12s ease, box-shadow 0.15s ease;
 	}
 	.play:hover {
-		background: var(--accent-strong);
+		transform: scale(1.06);
+		box-shadow: 0 4px 18px -2px rgba(224, 164, 92, 0.8), 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+	}
+	.play:active {
+		transform: scale(0.97);
 	}
 
 	.scrub {
@@ -290,8 +384,8 @@
 		border-radius: 2px;
 		background: linear-gradient(
 			to right,
-			var(--accent) 0%,
-			var(--accent) var(--pct, 0%),
+			rgb(var(--art)) 0%,
+			rgb(var(--art)) var(--pct, 0%),
 			var(--surface-3) var(--pct, 0%)
 		);
 		cursor: pointer;
@@ -345,7 +439,7 @@
 		border-radius: 1px;
 	}
 	.wb.played {
-		background: var(--accent-dim);
+		background: rgb(var(--art) / 0.85);
 	}
 
 	.right {

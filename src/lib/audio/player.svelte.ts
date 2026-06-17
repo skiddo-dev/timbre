@@ -20,12 +20,21 @@ class Player {
 	shuffle = $state(false);
 	repeat = $state<'off' | 'all' | 'one'>('off');
 	leveling = $state(true);
+	/** Bit-perfect output: bypass the gain node (no app volume / no ReplayGain
+	 * leveling) so samples reach the output stage unaltered. Per-device preference,
+	 * persisted in localStorage. */
+	bitPerfect = $state(false);
+	/** Actual AudioContext rate ≈ the OS output device rate; 0 until the graph is
+	 * built (needs a user gesture). Compared to the source rate to tell the user
+	 * whether their device is matched (a mismatch means the browser resamples). */
+	outputRate = $state(0);
 	ready = $state(false);
 	/** 0..1 RMS level for the dock visualizer. */
 	level = $state(0);
 
 	#audio: HTMLAudioElement | null = null;
 	#ctx: AudioContext | null = null;
+	#src: MediaElementAudioSourceNode | null = null;
 	#gain: GainNode | null = null;
 	#analyser: AnalyserNode | null = null;
 	#freq: Uint8Array<ArrayBuffer> | null = null;
@@ -36,9 +45,26 @@ class Player {
 		return this.index >= 0 && this.index < this.queue.length ? this.queue[this.index] : null;
 	}
 
+	/** Sample rate of the playing track, in Hz (0 when nothing is loaded). */
+	get sourceRate(): number {
+		return this.current?.sampleRate ?? 0;
+	}
+
+	/** True when the output (≈ device) rate equals the source rate, i.e. no
+	 * sample-rate conversion happens in the path. Only meaningful once the graph
+	 * is built (outputRate > 0). */
+	get rateMatched(): boolean {
+		return this.outputRate > 0 && this.sourceRate > 0 && this.outputRate === this.sourceRate;
+	}
+
 	/** Load persisted state + queue from the server (called once on mount). */
 	async hydrate() {
 		if (!browser) return;
+		try {
+			this.bitPerfect = localStorage.getItem('timbre:bitPerfect') === '1';
+		} catch {
+			/* localStorage unavailable — default to off */
+		}
 		try {
 			const [stateRes, queueRes] = await Promise.all([
 				fetch('/api/player'),
@@ -85,22 +111,47 @@ class Player {
 		if (!this.#ctx) {
 			try {
 				this.#ctx = new AudioContext();
-				const src = this.#ctx.createMediaElementSource(this.#audio);
+				// A default context adopts the output device's rate, so ctx.sampleRate
+				// tells us what the hardware is running at — surfaced for bit-perfect.
+				this.outputRate = this.#ctx.sampleRate;
+				this.#src = this.#ctx.createMediaElementSource(this.#audio);
 				this.#gain = this.#ctx.createGain();
 				this.#analyser = this.#ctx.createAnalyser();
 				this.#analyser.fftSize = 64;
 				this.#freq = new Uint8Array(this.#analyser.frequencyBinCount);
-				src.connect(this.#gain);
-				this.#gain.connect(this.#analyser);
-				this.#analyser.connect(this.#ctx.destination);
-				this.#applyGain();
+				this.#wireGraph();
 			} catch {
 				this.#ctx = null; // Web Audio unavailable — fall back to element.volume
 			}
 		}
 	}
 
+	/** (Re)connect the output chain for the current mode. AnalyserNode is a
+	 * spec-guaranteed pass-through (it copies samples for the meter without
+	 * altering them), so the bit-perfect path stays sample-exact while keeping
+	 * the visualizer; only the GainNode touches samples, so bit-perfect drops it. */
+	#wireGraph() {
+		if (!this.#ctx || !this.#src || !this.#analyser || !this.#gain) return;
+		this.#src.disconnect();
+		this.#gain.disconnect();
+		this.#analyser.disconnect();
+		if (this.bitPerfect) {
+			this.#src.connect(this.#analyser); // src → analyser → out (no gain)
+		} else {
+			this.#src.connect(this.#gain); // src → gain → analyser → out
+			this.#gain.connect(this.#analyser);
+		}
+		this.#analyser.connect(this.#ctx.destination);
+		this.#applyGain();
+	}
+
 	#applyGain() {
+		// Bit-perfect bypasses the gain node entirely (see #wireGraph); just make
+		// sure the no-Web-Audio fallback path is also at unity so nothing scales.
+		if (this.bitPerfect) {
+			if (this.#audio && !(this.#gain && this.#ctx)) this.#audio.volume = 1;
+			return;
+		}
 		const lvl =
 			this.leveling && this.current?.gainDb != null
 				? Math.min(4, Math.max(0.05, 10 ** (this.current.gainDb / 20)))
@@ -256,6 +307,21 @@ class Player {
 
 	toggleLeveling() {
 		this.leveling = !this.leveling;
+		this.#applyGain();
+	}
+
+	/** Toggle bit-perfect output. Re-wires the graph to drop/restore the gain
+	 * node and persists the choice per-device. */
+	toggleBitPerfect() {
+		this.bitPerfect = !this.bitPerfect;
+		if (browser) {
+			try {
+				localStorage.setItem('timbre:bitPerfect', this.bitPerfect ? '1' : '0');
+			} catch {
+				/* localStorage unavailable — preference is in-memory only */
+			}
+		}
+		this.#wireGraph(); // no-op until the graph is built; #ensureGraph reads bitPerfect
 		this.#applyGain();
 	}
 
