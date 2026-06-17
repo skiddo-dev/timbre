@@ -59,7 +59,7 @@
 		flex-direction: column;
 		gap: 0.25rem;
 		padding: 1.1rem 0.85rem;
-		background: var(--surface);
+		background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface) 80%, var(--bg)));
 		border-right: 1px solid var(--border-soft);
 	}
 	.brand {
@@ -75,6 +75,7 @@
 	.brand-mark {
 		color: var(--accent);
 		font-size: 1.1rem;
+		text-shadow: 0 0 14px rgba(224, 164, 92, 0.7);
 	}
 	nav {
 		display: flex;
@@ -82,6 +83,7 @@
 		gap: 0.15rem;
 	}
 	.nav-link {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 0.7rem;
@@ -96,8 +98,21 @@
 		color: var(--text);
 	}
 	.nav-link.active {
-		background: var(--surface-3);
+		background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 80%);
 		color: var(--text);
+	}
+	/* an accent rail marks the current section */
+	.nav-link.active::before {
+		content: '';
+		position: absolute;
+		left: -0.1rem;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 3px;
+		height: 1.1rem;
+		border-radius: 0 3px 3px 0;
+		background: var(--accent);
+		box-shadow: 0 0 10px rgba(224, 164, 92, 0.7);
 	}
 	.nav-link.active .nav-icon {
 		color: var(--accent);
@@ -115,6 +130,8 @@
 	.content {
 		min-width: 0;
 		padding: 1.6rem 2rem calc(var(--dock-h) + 2rem);
+		/* lets hero colour-washes bleed to the content edges without page scroll */
+		overflow-x: clip;
 	}
 	@media (max-width: 680px) {
 		.app {
@@ -146,6 +163,12 @@
 			flex-direction: column;
 			gap: 0.2rem;
 			font-size: 0.7rem;
+		}
+		.nav-link.active {
+			background: none;
+		}
+		.nav-link.active::before {
+			display: none;
 		}
 		.content {
 			padding: 1rem 1rem calc(var(--dock-h) + 4rem);

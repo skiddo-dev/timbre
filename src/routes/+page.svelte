@@ -22,6 +22,7 @@
 	</div>
 {:else}
 	<header class="page-head">
+		<span class="eyebrow">Your library</span>
 		<h1>Home</h1>
 		<p class="muted mono small">
 			{data.stats.tracks} tracks · {data.stats.albums} albums · {data.stats.artists} artists
@@ -87,6 +88,12 @@
 	section h2 {
 		font-size: 1.15rem;
 		margin-bottom: 1rem;
+		padding-left: 0.7rem;
+		border-left: 3px solid var(--accent);
+		line-height: 1.1;
+	}
+	.sec-head h2 {
+		margin-bottom: 0;
 	}
 	.sec-head {
 		display: flex;
@@ -102,23 +109,26 @@
 	.recent-card {
 		display: flex;
 		align-items: center;
-		gap: 0.7rem;
-		background: var(--surface);
+		gap: 0.75rem;
+		background: linear-gradient(180deg, var(--surface-2), var(--surface));
 		border: 1px solid var(--border-soft);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius);
 		padding: 0.5rem;
 		text-align: left;
 		min-width: 0;
-		transition: background 0.12s ease;
+		transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
 	}
 	.recent-card:hover {
-		background: var(--surface-2);
+		background: var(--surface-3);
+		border-color: var(--border);
+		transform: translateY(-2px);
 	}
 	.rc-art {
-		width: 46px;
+		width: 50px;
 		flex: none;
-		border-radius: 6px;
+		border-radius: 7px;
 		overflow: hidden;
+		box-shadow: var(--shadow-sm);
 	}
 	.rc-meta {
 		min-width: 0;
