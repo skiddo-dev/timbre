@@ -11,6 +11,7 @@
 // → search → album page → queue/player → enrich → loudness pipeline over HTTP.
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { createMockSnapserver } from './mock-snapserver.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:5181';
 const MUSIC_DIR = process.env.MUSIC_DIR || '/tmp/timbre-verify-music';
@@ -77,6 +78,10 @@ const fixtures = [
 ];
 for (const f of fixtures) writeFileSync(join(MUSIC_DIR, f.file), buildWav(f));
 console.log(`wrote ${fixtures.length} tagged WAV fixtures to ${MUSIC_DIR}`);
+
+// fake snapserver for the zones control plane (the dev server connects to it via
+// SNAPCAST_HOST/SNAPCAST_RPC_PORT). Harmless if the dev server has no SNAPCAST_HOST.
+const mock = await createMockSnapserver(Number(process.env.SNAP_MOCK_PORT) || 1799);
 
 const getJson = async (p) => (await fetch(`${BASE}${p}`)).json();
 
@@ -149,7 +154,8 @@ if (loud.updated > 0) {
 // 9) AI discovery brain (offline heuristic / TIMBRE_FAKE_LLM — deterministic)
 const tag = await (await fetch(`${BASE}/api/ai/tag?wait=1`, { method: 'POST' })).json();
 ok(tag.error == null, `AI tag scan ran (${tag.error ?? 'ok'})`);
-ok(tag.updated >= 2, `tagged ${tag.updated} albums (expected ≥2)`);
+// fresh DB → tags ≥2 albums; re-run on a warm DB → nothing left to tag (total 0).
+ok(tag.updated >= 2 || tag.total === 0, `tagged ${tag.updated}/${tag.total} albums`);
 
 const taggedAlbum = await (await fetch(`${BASE}/albums/${track.albumId}`)).text();
 ok(/by Aurora Test/i.test(taggedAlbum) || /class="chip/.test(taggedAlbum), 'album page shows AI descriptor/chips');
@@ -164,6 +170,35 @@ ok((radio.tracks ?? []).every((t) => typeof t.id === 'number'), 'radio returns o
 
 const ask = await getJson(`/api/ai/ask?q=${encodeURIComponent('Aurora')}`);
 ok(Array.isArray(ask.tracks) && ask.tracks.length >= 1, `ask "Aurora" → ${ask.tracks?.length ?? 0} track(s)`);
+
+// 10) Snapcast zones control plane (against the in-process mock snapserver)
+const zones = await getJson('/api/zones');
+if (zones.configured) {
+	ok(zones.reachable, `snapserver reachable (${zones.error ?? 'ok'})`);
+	ok(zones.groups.length >= 2, `mapped ${zones.groups.length} group(s)`);
+	ok(zones.streams.some((s) => s.id === 'Timbre'), 'Timbre stream present');
+	const client = zones.groups[0]?.clients?.[0];
+	ok(!!client, `group has a client (${client?.name})`);
+	if (client) {
+		const after = await (await fetch(`${BASE}/api/zones`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'clientVolume', clientId: client.id, percent: 42, muted: false })
+		})).json();
+		const updated = after.groups?.flatMap((g) => g.clients).find((c) => c.id === client.id);
+		ok(updated?.volume === 42, `client volume persisted to 42 (got ${updated?.volume})`);
+		const routed = await (await fetch(`${BASE}/api/zones`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'groupStream', groupId: zones.groups[0].id, streamId: 'default' })
+		})).json();
+		const g0 = routed.groups?.find((g) => g.id === zones.groups[0].id);
+		ok(g0?.streamId === 'default', `group re-routed to 'default' stream (got ${g0?.streamId})`);
+	}
+} else {
+	console.log('  (SNAPCAST_HOST not set on the dev server — zones control plane skipped)');
+}
+mock.close();
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

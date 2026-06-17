@@ -26,6 +26,9 @@ library, artwork, playback, analysis — stays on that machine.
   natural-language **Ask** search ("mellow jazz for a rainy evening"). The model only ever resolves
   to tracks that exist in your library, and everything degrades to deterministic heuristics with no
   model — so it works offline and under `TIMBRE_FAKE_LLM=1`.
+- **Multi-room (Snapcast)** — the `/zones` screen manages synchronized, bit-perfect whole-home audio
+  via [Snapcast](https://github.com/badaix/snapcast): group rooms, route streams, balance per-room
+  volume, and cast the play queue to your rooms. Disabled until you set `SNAPCAST_HOST`.
 
 ## Quick start
 
@@ -64,12 +67,32 @@ MUSIC_DIR=/tmp/timbre-verify-music npm run verify
 The harness writes tagged WAV fixtures, then asserts the full scan → stream(+Range) → search →
 album page → queue/player → enrich → loudness pipeline over HTTP.
 
+## Multi-room setup (Snapcast)
+
+On the machine running Timbre, run `snapserver` with a Timbre stream, run `snapclient` in each room,
+then point Timbre at the server in `.env`:
+
+```ini
+# snapserver.conf
+[stream]
+source = pipe:///tmp/snapfifo?name=Timbre&sampleformat=48000:16:2
+```
+```bash
+# Timbre .env
+SNAPCAST_HOST=127.0.0.1
+SNAPCAST_RPC_PORT=1705
+SNAPCAST_FIFO=/tmp/snapfifo
+```
+
+No daemons handy? `npm run mock:snap` starts a fake snapserver so you can open `/zones` and click
+around. The audio feeder (decode → FIFO) needs `ffmpeg`; the control plane does not.
+
 ## Roadmap
 
 - ✅ **M7 — Local-AI discovery brain** (shipped): auto-tagging, Radio, natural-language Ask.
-- **M6 — Snapcast multi-room.** Timbre Core becomes the controller for synchronized, bit-perfect
-  whole-home audio (the part Roon people pay for). The player/queue API is seamed for this.
-- Later: streaming sources (the `albums.source` seam), AirPlay endpoints, on-the-fly transcode.
+- ✅ **M6 — Snapcast multi-room** (shipped): `/zones` control plane + queue casting via the FIFO feeder.
+- Later: streaming sources (the `albums.source` seam), AirPlay endpoints, on-the-fly transcode,
+  WebSocket push for live zone updates (currently polled).
 
 ## Architecture
 

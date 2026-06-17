@@ -82,3 +82,35 @@ export interface SearchResults {
 	albums: Album[];
 	tracks: Track[];
 }
+
+// ── Snapcast multi-room (M6) ─────────────────────────────────────────────────
+export interface SnapClient {
+	id: string;
+	name: string;
+	host: string;
+	connected: boolean;
+	volume: number; // 0..100
+	muted: boolean;
+	latency: number;
+}
+
+export interface SnapGroup {
+	id: string;
+	name: string;
+	streamId: string;
+	muted: boolean;
+	clients: SnapClient[];
+}
+
+export interface SnapStream {
+	id: string;
+	status: string; // 'playing' | 'idle' | …
+}
+
+export interface ZoneStatus {
+	configured: boolean;
+	reachable: boolean;
+	groups: SnapGroup[];
+	streams: SnapStream[];
+	error: string | null;
+}

@@ -10,6 +10,7 @@
 		{ href: '/albums', label: 'Albums', icon: '▦' },
 		{ href: '/artists', label: 'Artists', icon: '☻' },
 		{ href: '/search', label: 'Search', icon: '⌕' },
+		{ href: '/zones', label: 'Zones', icon: '◫' },
 		{ href: '/settings', label: 'Settings', icon: '⚙' }
 	];
 
