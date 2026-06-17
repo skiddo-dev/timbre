@@ -28,6 +28,20 @@
 		}, 700);
 	}
 
+	let tags = $state<ScanStatus | null>(null);
+	let tagPoll: ReturnType<typeof setInterval> | null = null;
+	async function analyzeTags() {
+		tags = await (await fetch('/api/ai/tag', { method: 'POST' })).json();
+		if (tagPoll) clearInterval(tagPoll);
+		tagPoll = setInterval(async () => {
+			tags = await (await fetch('/api/ai/tag')).json();
+			if (!tags?.running) {
+				clearInterval(tagPoll!);
+				tagPoll = null;
+			}
+		}, 700);
+	}
+
 	async function save() {
 		saving = true;
 		saved = false;
@@ -137,6 +151,31 @@
 		<p class="muted mono small">{loud.scanned} / {loud.total} tracks</p>
 	{:else if loud?.error}
 		<p class="err">{loud.error}</p>
+	{/if}
+</section>
+
+<section class="card">
+	<h2>Discovery (AI)</h2>
+	<p class="muted small" style="margin-top:0">
+		Tag every album with a genre, mood and a one-line vibe using your local model (Ollama on the
+		3090/M5). Powers <strong>Radio</strong> and natural-language <strong>Ask</strong> search. Works
+		offline with a built-in heuristic when no model is configured.
+	</p>
+	<div class="row">
+		<button class="btn" onclick={analyzeTags} disabled={tags?.running}>
+			{tags?.running ? 'Analyzing…' : 'Analyze with AI'}
+		</button>
+		{#if tags && !tags.running && tags.finishedAt}
+			<span class="ok mono">tagged {tags.updated}/{tags.total} ✓</span>
+		{/if}
+	</div>
+	{#if tags?.running}
+		<div class="progress">
+			<div class="bar" style:width={`${tags.total ? (tags.scanned / tags.total) * 100 : 0}%`}></div>
+		</div>
+		<p class="muted mono small">{tags.scanned} / {tags.total} albums</p>
+	{:else if tags?.error}
+		<p class="err">{tags.error}</p>
 	{/if}
 </section>
 

@@ -20,6 +20,22 @@
 		for (const t of tracks) player.enqueue(t);
 	}
 
+	let radioLoading = $state(false);
+	async function radio() {
+		radioLoading = true;
+		try {
+			const res = await fetch('/api/ai/radio', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ albumId: data.album.id, count: 25 })
+			});
+			const { tracks: rt } = await res.json();
+			if (rt?.length) player.playContext(rt, 0);
+		} finally {
+			radioLoading = false;
+		}
+	}
+
 	const totalMs = $derived(tracks.reduce((s, t) => s + t.durationMs, 0));
 	const quality = $derived(tracks[0] ? qualityLabel(tracks[0]) : '');
 	// disc boundaries for headers (only shown when >1 disc)
@@ -45,9 +61,20 @@
 		<div class="facts muted mono">
 			{#if data.album.year}{data.album.year} · {/if}{tracks.length} tracks · {formatDuration(totalMs)}{#if quality} · {quality}{/if}
 		</div>
+		{#if data.album.genre || data.album.mood || data.album.tags.length}
+			<div class="ai-chips">
+				{#if data.album.genre}<span class="chip">{data.album.genre}</span>{/if}
+				{#if data.album.mood}<span class="chip">{data.album.mood}</span>{/if}
+				{#each data.album.tags as tag (tag)}<span class="chip faint">{tag}</span>{/each}
+			</div>
+		{/if}
+		{#if data.album.descriptor}
+			<p class="descriptor muted">{data.album.descriptor}</p>
+		{/if}
 		<div class="actions">
 			<button class="btn btn-accent" onclick={playAlbum}>▶ Play</button>
 			<button class="btn" onclick={shuffleAlbum}>⤮ Shuffle</button>
+			<button class="btn" onclick={radio} disabled={radioLoading}>{radioLoading ? '…' : '📻 Radio'}</button>
 			<button class="btn" onclick={queueAlbum}>＋ Queue</button>
 		</div>
 	</div>
@@ -103,7 +130,19 @@
 	}
 	.facts {
 		font-size: 0.82rem;
-		margin-bottom: 1.1rem;
+		margin-bottom: 0.7rem;
+	}
+	.ai-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-bottom: 0.6rem;
+	}
+	.descriptor {
+		font-size: 0.88rem;
+		max-width: 540px;
+		margin: 0 0 1rem;
+		line-height: 1.5;
 	}
 	.actions {
 		display: flex;

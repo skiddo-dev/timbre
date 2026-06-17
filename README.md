@@ -21,6 +21,11 @@ library, artwork, playback, analysis — stays on that machine.
 - **Volume leveling** — a hand-authored **WASM kernel** computes EBU R128 loudness + true peak +
   a waveform overview (≈2.7× faster than JS, verified bit-exact against a JS twin). The player can
   then play everything at a consistent volume.
+- **Discovery brain (local AI)** — your local model (Ollama on the 3090/M5) auto-tags albums with
+  genre/mood/vibe, powers **Radio** (a queue that flows from any track/album/artist) and
+  natural-language **Ask** search ("mellow jazz for a rainy evening"). The model only ever resolves
+  to tracks that exist in your library, and everything degrades to deterministic heuristics with no
+  model — so it works offline and under `TIMBRE_FAKE_LLM=1`.
 
 ## Quick start
 
@@ -59,12 +64,11 @@ MUSIC_DIR=/tmp/timbre-verify-music npm run verify
 The harness writes tagged WAV fixtures, then asserts the full scan → stream(+Range) → search →
 album page → queue/player → enrich → loudness pipeline over HTTP.
 
-## Roadmap (deliberately out of v1)
+## Roadmap
 
+- ✅ **M7 — Local-AI discovery brain** (shipped): auto-tagging, Radio, natural-language Ask.
 - **M6 — Snapcast multi-room.** Timbre Core becomes the controller for synchronized, bit-perfect
   whole-home audio (the part Roon people pay for). The player/queue API is seamed for this.
-- **M7 — Local-AI discovery brain.** Ollama on the 3090/M5 for library "radio", natural-language
-  search, and auto mood/genre tagging. `src/lib/server/llm.ts` is wired and waiting.
 - Later: streaming sources (the `albums.source` seam), AirPlay endpoints, on-the-fly transcode.
 
 ## Architecture

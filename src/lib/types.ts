@@ -21,6 +21,11 @@ export interface Album {
 	addedAt: string;
 	trackCount?: number;
 	durationMs?: number;
+	// AI discovery tags (M7) — null until "Analyze with AI" runs
+	genre: string | null;
+	mood: string | null;
+	tags: string[];
+	descriptor: string | null;
 }
 
 export interface Track {

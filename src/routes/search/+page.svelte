@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
+	import type { Track } from '$lib/types';
 	import AlbumGrid from '$lib/components/AlbumGrid.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TrackRow from '$lib/components/TrackRow.svelte';
@@ -12,14 +13,37 @@
 	let q = $state(data.q); // editable copy; server nav updates data.q, not this
 	let input: HTMLInputElement;
 	let timer: ReturnType<typeof setTimeout>;
+	let mode = $state<'search' | 'ask'>('search');
+	let asking = $state(false);
+	let askTracks = $state<Track[]>([]);
+	let askNote = $state('');
 
 	onMount(() => input?.focus());
 
 	function onInput() {
+		if (mode !== 'search') return;
 		clearTimeout(timer);
 		timer = setTimeout(() => {
 			goto(`/search?q=${encodeURIComponent(q)}`, { keepFocus: true, noScroll: true, replaceState: true });
 		}, 220);
+	}
+
+	function onKey(e: KeyboardEvent) {
+		if (e.key === 'Enter' && mode === 'ask') runAsk();
+	}
+
+	async function runAsk() {
+		const query = q.trim();
+		if (!query) return;
+		asking = true;
+		try {
+			const res = await fetch(`/api/ai/ask?q=${encodeURIComponent(query)}`);
+			const d = await res.json();
+			askTracks = d.tracks ?? [];
+			askNote = d.note ?? '';
+		} finally {
+			asking = false;
+		}
 	}
 
 	const r = $derived(data.results);
@@ -28,20 +52,53 @@
 
 <svelte:head><title>Search · Timbre</title></svelte:head>
 
+<div class="modes">
+	<button class="mode" class:active={mode === 'search'} onclick={() => (mode = 'search')}>Search</button>
+	<button class="mode" class:active={mode === 'ask'} onclick={() => (mode = 'ask')}>✦ Ask AI</button>
+</div>
+
 <div class="searchbar">
-	<span class="ico">⌕</span>
+	<span class="ico">{mode === 'ask' ? '✦' : '⌕'}</span>
 	<input
 		bind:this={input}
 		bind:value={q}
 		oninput={onInput}
+		onkeydown={onKey}
 		type="search"
-		placeholder="Search artists, albums, tracks…"
+		placeholder={mode === 'ask'
+			? 'Describe a vibe, then press Enter — “mellow jazz for a rainy evening”'
+			: 'Search artists, albums, tracks…'}
 		autocomplete="off"
 		spellcheck="false"
 	/>
+	{#if mode === 'ask'}
+		<button class="ask-go" onclick={runAsk} disabled={asking}>{asking ? '…' : 'Ask'}</button>
+	{/if}
 </div>
 
-{#if !data.q}
+{#if mode === 'ask'}
+	{#if asking}
+		<p class="hint muted">Thinking…</p>
+	{:else if askTracks.length}
+		<section>
+			<div class="ask-head">
+				<p class="note">{askNote}</p>
+				<button class="btn" onclick={() => player.playContext(askTracks, 0)}>▶ Play all</button>
+			</div>
+			<div class="tracks">
+				{#each askTracks as t, i (t.id)}
+					<TrackRow track={t} index={i + 1} showArtist onplay={() => player.playContext(askTracks, i)} />
+				{/each}
+			</div>
+		</section>
+	{:else if askNote}
+		<p class="hint muted">No matches — try “Analyze with AI” in Settings, or rephrase.</p>
+	{:else}
+		<p class="hint muted">
+			Ask for a mood, era, or activity. Tip: run “Analyze with AI” in Settings first for the best results.
+		</p>
+	{/if}
+{:else if !data.q}
 	<p class="hint muted">Start typing to search your library.</p>
 {:else if !hasResults}
 	<p class="hint muted">No matches for “{data.q}”.</p>
@@ -95,8 +152,60 @@
 	}
 	.searchbar input {
 		padding-left: 2.4rem;
+		padding-right: 4.5rem;
 		font-size: 1.05rem;
 		height: 3rem;
+	}
+	.ask-go {
+		position: absolute;
+		right: 0.4rem;
+		top: 50%;
+		transform: translateY(-50%);
+		z-index: 2;
+		background: var(--accent);
+		color: var(--accent-contrast);
+		border: none;
+		border-radius: var(--radius-sm);
+		padding: 0.45rem 0.95rem;
+		font-weight: 600;
+		font-size: 0.85rem;
+	}
+	.ask-go:hover {
+		background: var(--accent-strong);
+	}
+	.modes {
+		display: flex;
+		gap: 0.3rem;
+		margin-bottom: 0.8rem;
+	}
+	.mode {
+		padding: 0.35rem 0.9rem;
+		border-radius: 999px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text-dim);
+		font-size: 0.85rem;
+		font-weight: 500;
+	}
+	.mode:hover {
+		color: var(--text);
+	}
+	.mode.active {
+		background: var(--accent);
+		color: var(--accent-contrast);
+		border-color: transparent;
+	}
+	.ask-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 0.9rem;
+	}
+	.note {
+		margin: 0;
+		color: var(--text-dim);
+		font-style: italic;
 	}
 	.hint {
 		margin-top: 2rem;

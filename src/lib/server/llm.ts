@@ -16,6 +16,16 @@ export function llmConfigured(): boolean {
 	return baseUrl().length > 0;
 }
 
+/** Offline deterministic mode for tests — features use heuristics/fixtures, not the model. */
+export function llmFake(): boolean {
+	return env.TIMBRE_FAKE_LLM === '1' || env.TIMBRE_FAKE_LLM === 'true';
+}
+
+/** Use the real model only when configured AND not in fake mode. */
+export function useModel(): boolean {
+	return llmConfigured() && !llmFake();
+}
+
 export function llmModel(): string {
 	return model();
 }

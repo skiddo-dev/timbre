@@ -10,9 +10,19 @@ const strN = (v: unknown): string | null => (v == null ? null : String(v));
 const num = (v: unknown): number => (v == null ? 0 : Number(v));
 const numN = (v: unknown): number | null => (v == null ? null : Number(v));
 const bool = (v: unknown): boolean => !!Number(v);
+const jsonArr = (v: unknown): string[] => {
+	if (v == null) return [];
+	try {
+		const a = JSON.parse(String(v));
+		return Array.isArray(a) ? a.map(String) : [];
+	} catch {
+		return [];
+	}
+};
 
 const ARTIST_COLS = `id, name, sort_name, mbid, bio, (image_path IS NOT NULL) AS has_image`;
-const ALBUM_COLS = `id, title, album_artist, year, mbid, source, (art_path IS NOT NULL) AS has_art, added_at`;
+const ALBUM_COLS = `id, title, album_artist, year, mbid, source, (art_path IS NOT NULL) AS has_art,
+	added_at, genre, mood, tags, descriptor`;
 const TRACK_COLS = `id, album_id, artist, title, track_no, disc_no, duration_ms, codec, sample_rate,
 	bit_depth, channels, bitrate, loudness_lufs, true_peak, gain_db,
 	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at`;
@@ -39,7 +49,11 @@ export function mapAlbum(r: Row): Album {
 		hasArt: bool(r.has_art),
 		addedAt: str(r.added_at),
 		trackCount: r.track_count == null ? undefined : num(r.track_count),
-		durationMs: r.duration_ms == null ? undefined : num(r.duration_ms)
+		durationMs: r.duration_ms == null ? undefined : num(r.duration_ms),
+		genre: strN(r.genre),
+		mood: strN(r.mood),
+		tags: jsonArr(r.tags),
+		descriptor: strN(r.descriptor)
 	};
 }
 
@@ -71,7 +85,7 @@ export function mapTrack(r: Row): Track {
 const ALBUM_STATS = `LEFT JOIN tracks t ON t.album_id = a.id`;
 const ALBUM_SELECT_STATS = `
 	SELECT a.id, a.title, a.album_artist, a.year, a.mbid, a.source,
-		(a.art_path IS NOT NULL) AS has_art, a.added_at,
+		(a.art_path IS NOT NULL) AS has_art, a.added_at, a.genre, a.mood, a.tags, a.descriptor,
 		COUNT(t.id) AS track_count, COALESCE(SUM(t.duration_ms), 0) AS duration_ms
 	FROM albums a ${ALBUM_STATS}`;
 
@@ -200,4 +214,94 @@ export function libraryStats(): LibraryStats {
 		)
 		.get() as Row;
 	return { artists: num(r.artists), albums: num(r.albums), tracks: num(r.tracks) };
+}
+
+// ── AI discovery support (M7) ────────────────────────────────────────────────
+const TRACK_COLS_T = `t.id, t.album_id, t.artist, t.title, t.track_no, t.disc_no, t.duration_ms,
+	t.codec, t.sample_rate, t.bit_depth, t.channels, t.bitrate, t.loudness_lufs, t.true_peak,
+	t.gain_db, (t.peaks_blob IS NOT NULL) AS has_peaks, t.play_count, t.last_played_at,
+	(SELECT title FROM albums WHERE id = t.album_id) AS album_title`;
+
+/** Fetch tracks by id, preserving the order of `ids` (only real tracks returned). */
+export function getTracksByIds(ids: number[]): Track[] {
+	if (ids.length === 0) return [];
+	const ph = ids.map(() => '?').join(',');
+	const rows = db.prepare(`SELECT ${TRACK_COLS_T} FROM tracks t WHERE t.id IN (${ph})`).all(...ids) as Row[];
+	const byId = new Map(rows.map((r) => [num(r.id), mapTrack(r)]));
+	return ids.map((id) => byId.get(id)).filter((t): t is Track => !!t);
+}
+
+export interface PoolItem {
+	id: number;
+	artist: string;
+	title: string;
+	genre: string | null;
+	mood: string | null;
+}
+
+/** A lightweight candidate pool (track + its album genre/mood) for AI prompts. */
+export function tracksForPrompt(limit = 300): PoolItem[] {
+	return (
+		db
+			.prepare(
+				`SELECT t.id, t.artist, t.title, a.genre, a.mood
+				 FROM tracks t JOIN albums a ON a.id = t.album_id ORDER BY t.id LIMIT ?`
+			)
+			.all(limit) as Row[]
+	).map((r) => ({ id: num(r.id), artist: str(r.artist), title: str(r.title), genre: strN(r.genre), mood: strN(r.mood) }));
+}
+
+export function albumsNeedingTags(limit = 0): { id: number; title: string; albumArtist: string }[] {
+	const sql = `SELECT id, title, album_artist FROM albums WHERE analyzed_at IS NULL ORDER BY id${limit ? ' LIMIT ' + Math.floor(limit) : ''}`;
+	return (db.prepare(sql).all() as Row[]).map((r) => ({
+		id: num(r.id),
+		title: str(r.title),
+		albumArtist: str(r.album_artist)
+	}));
+}
+
+export function albumTrackTitles(albumId: number, limit = 20): string[] {
+	return (
+		db.prepare('SELECT title FROM tracks WHERE album_id = ? ORDER BY disc_no, track_no LIMIT ?').all(albumId, limit) as Row[]
+	).map((r) => str(r.title));
+}
+
+export function setAlbumTags(
+	id: number,
+	t: { genre: string | null; mood: string | null; tags: string[]; descriptor: string | null }
+): void {
+	db.prepare(
+		`UPDATE albums SET genre = ?, mood = ?, tags = ?, descriptor = ?, analyzed_at = ? WHERE id = ?`
+	).run(t.genre, t.mood, JSON.stringify(t.tags ?? []), t.descriptor, new Date().toISOString(), id);
+}
+
+/** Distinct tracks matching any of the given genres/moods/artists (+ optional year range). */
+export function tracksByCriteria(c: {
+	genres?: string[];
+	moods?: string[];
+	artists?: string[];
+	yearFrom?: number | null;
+	yearTo?: number | null;
+	text?: string | null;
+	limit?: number;
+}): Track[] {
+	const where: string[] = [];
+	const args: (string | number)[] = [];
+	const ors: string[] = [];
+	for (const g of c.genres ?? []) { ors.push('a.genre LIKE ?'); args.push(`%${g}%`); }
+	for (const m of c.moods ?? []) { ors.push('a.mood LIKE ?'); args.push(`%${m}%`); }
+	for (const ar of c.artists ?? []) { ors.push('t.artist LIKE ?'); args.push(`%${ar}%`); }
+	if (c.text) { ors.push('(t.title LIKE ? OR t.artist LIKE ? OR a.descriptor LIKE ?)'); args.push(`%${c.text}%`, `%${c.text}%`, `%${c.text}%`); }
+	if (ors.length) where.push(`(${ors.join(' OR ')})`);
+	if (c.yearFrom != null) { where.push('a.year >= ?'); args.push(c.yearFrom); }
+	if (c.yearTo != null) { where.push('a.year <= ?'); args.push(c.yearTo); }
+	if (where.length === 0) return [];
+	const limit = Math.min(100, c.limit ?? 40);
+	const rows = db
+		.prepare(
+			`SELECT ${TRACK_COLS_T} FROM tracks t JOIN albums a ON a.id = t.album_id
+			 WHERE ${where.join(' AND ')} ORDER BY t.play_count DESC, t.id LIMIT ?`
+		)
+		.all(...args, limit) as Row[];
+	return rows.map(mapTrack);
 }

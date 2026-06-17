@@ -146,5 +146,24 @@ if (loud.updated > 0) {
 	console.log('  (ffmpeg not found — loudness analysis skipped, which is allowed)');
 }
 
+// 9) AI discovery brain (offline heuristic / TIMBRE_FAKE_LLM — deterministic)
+const tag = await (await fetch(`${BASE}/api/ai/tag?wait=1`, { method: 'POST' })).json();
+ok(tag.error == null, `AI tag scan ran (${tag.error ?? 'ok'})`);
+ok(tag.updated >= 2, `tagged ${tag.updated} albums (expected ≥2)`);
+
+const taggedAlbum = await (await fetch(`${BASE}/albums/${track.albumId}`)).text();
+ok(/by Aurora Test/i.test(taggedAlbum) || /class="chip/.test(taggedAlbum), 'album page shows AI descriptor/chips');
+
+const radio = await (await fetch(`${BASE}/api/ai/radio`, {
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify({ albumId: track.albumId, count: 10 })
+})).json();
+ok(Array.isArray(radio.tracks) && radio.tracks.length >= 1, `radio built ${radio.tracks?.length ?? 0} track(s)`);
+ok((radio.tracks ?? []).every((t) => typeof t.id === 'number'), 'radio returns only real library tracks');
+
+const ask = await getJson(`/api/ai/ask?q=${encodeURIComponent('Aurora')}`);
+ok(Array.isArray(ask.tracks) && ask.tracks.length >= 1, `ask "Aurora" → ${ask.tracks?.length ?? 0} track(s)`);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

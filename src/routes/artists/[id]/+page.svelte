@@ -3,15 +3,32 @@
 	import type { PageData } from './$types';
 	import AlbumGrid from '$lib/components/AlbumGrid.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
+	import { player } from '$lib/audio/player.svelte';
 
 	let { data }: { data: PageData } = $props();
 	let enriching = $state(false);
+	let radioLoading = $state(false);
 
 	async function enrich() {
 		enriching = true;
 		await fetch(`/api/artists/${data.artist.id}/enrich`, { method: 'POST' }).catch(() => {});
 		await invalidateAll();
 		enriching = false;
+	}
+
+	async function radio() {
+		radioLoading = true;
+		try {
+			const res = await fetch('/api/ai/radio', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ artistId: data.artist.id, count: 25 })
+			});
+			const { tracks } = await res.json();
+			if (tracks?.length) player.playContext(tracks, 0);
+		} finally {
+			radioLoading = false;
+		}
 	}
 </script>
 
@@ -27,6 +44,9 @@
 			<p class="bio">{data.artist.bio}</p>
 		{/if}
 		<div class="actions">
+			<button class="btn btn-accent" onclick={radio} disabled={radioLoading}>
+				{radioLoading ? '…' : '📻 Artist radio'}
+			</button>
 			<button class="btn" onclick={enrich} disabled={enriching}>
 				{enriching ? 'Fetching…' : data.artist.bio ? 'Refresh bio & image' : 'Fetch bio & image'}
 			</button>

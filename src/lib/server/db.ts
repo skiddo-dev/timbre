@@ -98,6 +98,16 @@ const MIGRATIONS: Migration[] = [
 			value TEXT NOT NULL
 		);
 		`
+	},
+	{
+		id: '002_ai_tags',
+		sql: `
+		ALTER TABLE albums ADD COLUMN genre TEXT;
+		ALTER TABLE albums ADD COLUMN mood TEXT;
+		ALTER TABLE albums ADD COLUMN tags TEXT;          -- JSON array of descriptors
+		ALTER TABLE albums ADD COLUMN descriptor TEXT;    -- one-line vibe sentence
+		ALTER TABLE albums ADD COLUMN analyzed_at TEXT;   -- when the AI last tagged it
+		`
 	}
 ];
 
