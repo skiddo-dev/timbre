@@ -17,6 +17,7 @@ function init(): DatabaseSync {
 	migrate(handle);
 	ftsAvailable = setupSearch(handle);
 	seedPlayer(handle);
+	seedRadio(handle);
 	return handle;
 }
 
@@ -108,6 +109,19 @@ const MIGRATIONS: Migration[] = [
 		ALTER TABLE albums ADD COLUMN descriptor TEXT;    -- one-line vibe sentence
 		ALTER TABLE albums ADD COLUMN analyzed_at TEXT;   -- when the AI last tagged it
 		`
+	},
+	{
+		id: '003_radio',
+		sql: `
+		CREATE TABLE radio_stations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			url TEXT NOT NULL,
+			genre TEXT,
+			favicon TEXT,
+			added_at TEXT NOT NULL
+		);
+		`
 	}
 ];
 
@@ -148,6 +162,23 @@ function seedPlayer(handle: DatabaseSync): void {
 		 VALUES (1, NULL, 0, 1.0, 0, 'off')
 		 ON CONFLICT(id) DO NOTHING`
 	);
+}
+
+// A few well-known public internet-radio streams so /radio isn't empty on day one.
+const DEFAULT_STATIONS: [name: string, url: string, genre: string][] = [
+	['SomaFM — Groove Salad', 'https://ice1.somafm.com/groovesalad-128-mp3', 'Ambient / Downtempo'],
+	['SomaFM — Drone Zone', 'https://ice1.somafm.com/dronezone-128-mp3', 'Ambient'],
+	['SomaFM — Indie Pop Rocks', 'https://ice1.somafm.com/indiepop-128-mp3', 'Indie'],
+	['SomaFM — Lush', 'https://ice1.somafm.com/lush-128-mp3', 'Vocal / Chill'],
+	['WFMU', 'https://stream0.wfmu.org/freeform-128k', 'Freeform']
+];
+
+function seedRadio(handle: DatabaseSync): void {
+	const n = handle.prepare('SELECT COUNT(*) AS c FROM radio_stations').get() as { c: number };
+	if (Number(n.c) > 0) return;
+	const ins = handle.prepare('INSERT INTO radio_stations (name, url, genre, added_at) VALUES (?, ?, ?, ?)');
+	const now = new Date().toISOString();
+	for (const [name, url, genre] of DEFAULT_STATIONS) ins.run(name, url, genre, now);
 }
 
 // Declared last so migrations/seed run before init() at module load. Cached on

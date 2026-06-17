@@ -18,20 +18,51 @@
 	let zones = $state<ZoneStatus>(data.zones);
 	let cast = $state<CastStatus | null>(null);
 	let poll: ReturnType<typeof setInterval> | null = null;
+	let es: EventSource | null = null;
+
+	interface AirStatus {
+		enabled: boolean;
+		casting: boolean;
+		deviceId: string | null;
+		devices?: { id: string; name: string; address: string }[];
+	}
+	let air = $state<AirStatus | null>(null);
+	let scanningAir = $state(false);
 
 	onMount(() => {
 		refresh();
-		poll = setInterval(refresh, 3000);
-		return () => poll && clearInterval(poll);
+		loadAir();
+		// live zone updates via SSE; cast status stays on a light poll
+		es = new EventSource('/api/zones/events');
+		es.onmessage = (e) => {
+			try {
+				zones = JSON.parse(e.data);
+			} catch {
+				/* ignore */
+			}
+		};
+		poll = setInterval(refreshCast, 3000);
+		return () => {
+			es?.close();
+			if (poll) clearInterval(poll);
+		};
 	});
 
-	async function refresh() {
+	async function refreshCast() {
 		try {
-			zones = await (await fetch('/api/zones')).json();
 			cast = await (await fetch('/api/zones/cast')).json();
 		} catch {
 			/* keep last */
 		}
+	}
+
+	async function refresh() {
+		try {
+			zones = await (await fetch('/api/zones')).json();
+		} catch {
+			/* keep last */
+		}
+		refreshCast();
 	}
 
 	async function castAct(body: Record<string, unknown>) {
@@ -44,6 +75,34 @@
 
 	const castQueue = () =>
 		castAct({ action: 'start', trackIds: player.queue.map((t) => t.id), startIndex: Math.max(0, player.index) });
+
+	async function loadAir() {
+		try {
+			air = await (await fetch('/api/airplay')).json();
+		} catch {
+			/* ignore */
+		}
+	}
+	async function scanAir() {
+		scanningAir = true;
+		try {
+			air = await (await fetch('/api/airplay?scan=1')).json();
+		} finally {
+			scanningAir = false;
+		}
+	}
+	async function airAct(body: Record<string, unknown>) {
+		air = await (await fetch('/api/airplay', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+		})).json();
+	}
+	function castAir(deviceId: string) {
+		const cur = player.current;
+		if (!cur) return;
+		airAct(cur.isStream && cur.streamUrl ? { action: 'cast', deviceId, url: cur.streamUrl } : { action: 'cast', deviceId, trackId: cur.id });
+	}
 
 	async function act(body: Record<string, unknown>) {
 		const res = await fetch('/api/zones', {
@@ -174,6 +233,30 @@ SNAPCAST_FIFO=/tmp/snapfifo`}</pre>
 			</section>
 		{/each}
 	</div>
+{/if}
+
+{#if air?.enabled}
+	<section class="card airplay">
+		<div class="ap-head">
+			<h2>AirPlay <span class="chip faint">experimental</span></h2>
+			<button class="btn" onclick={scanAir} disabled={scanningAir}>{scanningAir ? 'Scanning…' : 'Scan'}</button>
+		</div>
+		{#if air.casting}
+			<p class="muted small">Casting to <span class="mono">{air.deviceId}</span> · <button class="btn btn-ghost" onclick={() => airAct({ action: 'stop' })}>Stop</button></p>
+		{/if}
+		{#if air.devices?.length}
+			<ul class="ap-list">
+				{#each air.devices as d (d.id)}
+					<li>
+						<span>{d.name} <span class="faint mono small">{d.address}</span></span>
+						<button class="btn btn-ghost" onclick={() => castAir(d.id)} disabled={!player.current}>Cast current →</button>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="faint small">Scan to find AirPlay receivers (needs <span class="mono">pyatv</span> installed). Snapcast is the primary multi-room path.</p>
+		{/if}
+	</section>
 {/if}
 
 <style>
@@ -354,5 +437,38 @@ SNAPCAST_FIFO=/tmp/snapfifo`}</pre>
 	.move {
 		font-size: 0.78rem;
 		padding: 0.2rem 0.4rem;
+	}
+	.airplay {
+		max-width: 680px;
+		margin-top: 0.4rem;
+	}
+	.ap-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.6rem;
+	}
+	.ap-head h2 {
+		margin: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.ap-list {
+		list-style: none;
+		margin: 0.6rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+	.ap-list li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		background: var(--surface-2);
+		border-radius: var(--radius-sm);
+		padding: 0.5rem 0.7rem;
 	}
 </style>

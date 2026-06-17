@@ -129,3 +129,77 @@ export const setGroupMute = (id: string, mute: boolean) => rpc('Group.SetMute', 
 
 export const setGroupClients = (id: string, clients: string[]) =>
 	rpc('Group.SetClients', { id, clients });
+
+// ── live subscription (push) ─────────────────────────────────────────────────
+// One persistent socket: GetStatus on connect, then re-GetStatus on every server
+// notification (Client.OnVolumeChanged, Group.OnStreamChanged, …) and push a fresh
+// snapshot. Auto-reconnects. Returns an unsubscribe fn. Used by the /zones SSE feed.
+export function openZoneStream(onStatus: (z: ZoneStatus) => void): () => void {
+	if (!snapcastConfigured()) {
+		onStatus({ configured: false, reachable: false, groups: [], streams: [], error: null });
+		return () => {};
+	}
+	let closed = false;
+	let sock: net.Socket | null = null;
+	let buf = '';
+	let reqId = 1;
+	let reconnect: ReturnType<typeof setTimeout> | null = null;
+
+	const askStatus = () => {
+		try {
+			sock?.write(JSON.stringify({ jsonrpc: '2.0', id: ++reqId, method: 'Server.GetStatus' }) + '\r\n');
+		} catch {
+			/* socket gone; reconnect will handle */
+		}
+	};
+
+	const connect = () => {
+		if (closed) return;
+		buf = '';
+		sock = net.createConnection({ host: HOST(), port: PORT() });
+		sock.on('connect', askStatus);
+		sock.on('data', (d) => {
+			buf += d.toString('utf8');
+			let nl: number;
+			while ((nl = buf.indexOf('\n')) >= 0) {
+				const line = buf.slice(0, nl).trim();
+				buf = buf.slice(nl + 1);
+				if (!line) continue;
+				let msg: Json;
+				try {
+					msg = JSON.parse(line);
+				} catch {
+					continue;
+				}
+				const result = (msg.result as Json) ?? null;
+				if (result && result.server) {
+					const server = result.server as Json;
+					const groups = Array.isArray(server.groups) ? (server.groups as Json[]).map(mapGroup) : [];
+					const streams = Array.isArray(server.streams) ? (server.streams as Json[]).map(mapStream) : [];
+					onStatus({ configured: true, reachable: true, groups, streams, error: null });
+				} else if (typeof msg.method === 'string') {
+					askStatus(); // a notification arrived — pull a fresh snapshot
+				}
+			}
+		});
+		const retry = () => {
+			if (closed) return;
+			onStatus({ configured: true, reachable: false, groups: [], streams: [], error: 'disconnected' });
+			if (reconnect) clearTimeout(reconnect);
+			reconnect = setTimeout(connect, 2000);
+		};
+		sock.on('error', retry);
+		sock.on('close', retry);
+	};
+
+	connect();
+	return () => {
+		closed = true;
+		if (reconnect) clearTimeout(reconnect);
+		try {
+			sock?.destroy();
+		} catch {
+			/* noop */
+		}
+	};
+}

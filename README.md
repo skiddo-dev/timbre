@@ -89,10 +89,15 @@ around. The audio feeder (decode → FIFO) needs `ffmpeg`; the control plane doe
 
 ## Roadmap
 
-- ✅ **M7 — Local-AI discovery brain** (shipped): auto-tagging, Radio, natural-language Ask.
-- ✅ **M6 — Snapcast multi-room** (shipped): `/zones` control plane + queue casting via the FIFO feeder.
-- Later: streaming sources (the `albums.source` seam), AirPlay endpoints, on-the-fly transcode,
-  WebSocket push for live zone updates (currently polled).
+- ✅ **M7 — Local-AI discovery brain**: auto-tagging, Radio, natural-language Ask.
+- ✅ **M6 — Snapcast multi-room**: `/zones` control plane + queue casting via the FIFO feeder.
+- ✅ **Non-local sources**: internet radio (`/radio`) over the `streamUrl` seam — the model for
+  adding Subsonic/Tidal/Qobuz providers later (those need accounts + unofficial APIs, so they're
+  out of scope here).
+- ✅ **On-the-fly transcode** for exotic codecs, **live zone updates** (SSE, no more polling), and a
+  best-effort **AirPlay output** via pyatv (`AIRPLAY_ENABLED=1`).
+- Later: real streaming-service providers, richer DSP (parametric EQ / room correction), and
+  unifying the browser player with the Snapcast/AirPlay output stages behind one transport.
 
 ## Architecture
 

@@ -85,6 +85,22 @@ const mock = await createMockSnapserver(Number(process.env.SNAP_MOCK_PORT) || 17
 
 const getJson = async (p) => (await fetch(`${BASE}${p}`)).json();
 
+async function readFirstSse(path, timeoutMs) {
+	const ctrl = new AbortController();
+	const t = setTimeout(() => ctrl.abort(), timeoutMs);
+	try {
+		const res = await fetch(`${BASE}${path}`, { signal: ctrl.signal, headers: { Accept: 'text/event-stream' } });
+		const reader = res.body.getReader();
+		const { value } = await reader.read();
+		await reader.cancel();
+		return value ? new TextDecoder().decode(value) : '';
+	} catch {
+		return '';
+	} finally {
+		clearTimeout(t);
+	}
+}
+
 // 1) scan (synchronous)
 const scan = await (await fetch(`${BASE}/api/scan?wait=1`, { method: 'POST' })).json();
 ok(!scan.running && scan.error == null, `scan finished cleanly (${scan.error ?? 'no error'})`);
@@ -198,6 +214,42 @@ if (zones.configured) {
 } else {
 	console.log('  (SNAPCAST_HOST not set on the dev server — zones control plane skipped)');
 }
+
+// 11) internet radio (the non-local source seam)
+const radio0 = await getJson('/api/radio');
+ok(Array.isArray(radio0.stations) && radio0.stations.length >= 1, `radio seeded ${radio0.stations?.length ?? 0} station(s)`);
+const added = await (await fetch(`${BASE}/api/radio`, {
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify({ name: 'Verify FM', url: 'https://example.com/stream.mp3', genre: 'Test' })
+})).json();
+const vfm = added.stations?.find((s) => s.name === 'Verify FM');
+ok(!!vfm, 'added a custom station');
+if (vfm) {
+	const afterDel = await (await fetch(`${BASE}/api/radio?id=${vfm.id}`, { method: 'DELETE' })).json();
+	ok(!afterDel.stations.some((s) => s.id === vfm.id), 'removed the custom station');
+}
+const bad = await fetch(`${BASE}/api/radio`, {
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify({ name: 'x', url: 'not-a-url' })
+});
+ok(bad.status === 400, `rejects an invalid station url → ${bad.status}`);
+const radioHtml = await (await fetch(`${BASE}/radio`)).text();
+ok(/SomaFM/i.test(radioHtml), '/radio page lists seeded stations');
+
+// 12) on-the-fly transcode (no ffmpeg here → graceful fallback to a raw audio body)
+const tc = await fetch(`${BASE}/api/stream/${track.id}?transcode=1`);
+ok(tc.ok && (tc.headers.get('content-type') || '').startsWith('audio/'), `transcode request served audio → ${tc.status} ${tc.headers.get('content-type')}`);
+
+// 13) live zone updates via SSE — first event carries a snapshot
+const sse = await readFirstSse('/api/zones/events', 5000);
+ok(sse.includes('"groups"'), 'SSE zone feed pushed an initial snapshot');
+
+// 14) AirPlay status (off unless AIRPLAY_ENABLED=1)
+const ap = await getJson('/api/airplay');
+ok(ap.enabled === false, 'AirPlay disabled by default');
+
 mock.close();
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

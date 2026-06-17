@@ -125,7 +125,8 @@ class Player {
 	#load(track: Track, autoplay: boolean) {
 		this.#ensureGraph();
 		if (!this.#audio) return;
-		this.#audio.src = `/api/stream/${track.id}`;
+		// Non-local sources (internet radio) stream a remote URL directly.
+		this.#audio.src = track.streamUrl ?? `/api/stream/${track.id}`;
 		this.durationMs = track.durationMs;
 		this.positionMs = 0;
 		this.#applyGain();
@@ -138,7 +139,7 @@ class Player {
 		try {
 			await this.#audio.play();
 			if (!this.#raf) this.#raf = requestAnimationFrame(this.#tickLevel);
-			fetch(`/api/tracks/${track.id}/played`, { method: 'POST' }).catch(() => {});
+			if (!track.streamUrl) fetch(`/api/tracks/${track.id}/played`, { method: 'POST' }).catch(() => {});
 		} catch {
 			/* autoplay blocked — user can press play */
 		}

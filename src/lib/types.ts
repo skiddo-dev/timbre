@@ -49,6 +49,18 @@ export interface Track {
 	hasPeaks: boolean;
 	playCount: number;
 	lastPlayedAt: string | null;
+	// Non-local source seam (M-followups): when set, the player streams this URL
+	// directly instead of /api/stream/[id] (e.g. internet radio).
+	streamUrl?: string;
+	isStream?: boolean;
+}
+
+export interface RadioStation {
+	id: number;
+	name: string;
+	url: string;
+	genre: string | null;
+	favicon: string | null;
 }
 
 export interface QueueItem {
