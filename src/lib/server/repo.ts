@@ -1,7 +1,7 @@
 // Every library query + the snake_case-row → camelCase-domain mapping lives here,
 // so SQL stays in one place and the routes/pages just call typed functions.
 import { db } from './db';
-import type { Album, Artist, Track } from '$lib/types';
+import type { Album, Artist, Playlist, Track } from '$lib/types';
 
 type Row = Record<string, unknown>;
 
@@ -25,7 +25,7 @@ const ALBUM_COLS = `id, title, album_artist, year, mbid, source, (art_path IS NO
 	added_at, genre, mood, tags, descriptor`;
 const TRACK_COLS = `id, album_id, artist, title, track_no, disc_no, duration_ms, codec, sample_rate,
 	bit_depth, channels, bitrate, loudness_lufs, true_peak, gain_db,
-	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at`;
+	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at, rating`;
 
 export function mapArtist(r: Row): Artist {
 	return {
@@ -77,7 +77,8 @@ export function mapTrack(r: Row): Track {
 		gainDb: numN(r.gain_db),
 		hasPeaks: bool(r.has_peaks),
 		playCount: num(r.play_count),
-		lastPlayedAt: strN(r.last_played_at)
+		lastPlayedAt: strN(r.last_played_at),
+		rating: numN(r.rating)
 	};
 }
 
@@ -219,7 +220,7 @@ export function libraryStats(): LibraryStats {
 // ── AI discovery support (M7) ────────────────────────────────────────────────
 const TRACK_COLS_T = `t.id, t.album_id, t.artist, t.title, t.track_no, t.disc_no, t.duration_ms,
 	t.codec, t.sample_rate, t.bit_depth, t.channels, t.bitrate, t.loudness_lufs, t.true_peak,
-	t.gain_db, (t.peaks_blob IS NOT NULL) AS has_peaks, t.play_count, t.last_played_at,
+	t.gain_db, (t.peaks_blob IS NOT NULL) AS has_peaks, t.play_count, t.last_played_at, t.rating,
 	(SELECT title FROM albums WHERE id = t.album_id) AS album_title`;
 
 /** Fetch tracks by id, preserving the order of `ids` (only real tracks returned). */
@@ -304,4 +305,33 @@ export function tracksByCriteria(c: {
 		)
 		.all(...args, limit) as Row[];
 	return rows.map(mapTrack);
+}
+
+// ── playlists (from a Music library import) ──────────────────────────────────
+export function listPlaylists(): Playlist[] {
+	return (
+		db
+			.prepare(
+				`SELECT p.id, p.name, p.source, COUNT(pt.track_id) AS track_count
+				 FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+				 GROUP BY p.id ORDER BY p.name COLLATE NOCASE`
+			)
+			.all() as Row[]
+	).map((r) => ({ id: num(r.id), name: str(r.name), source: str(r.source), trackCount: num(r.track_count) }));
+}
+
+export function getPlaylist(id: number): Playlist | null {
+	const r = db.prepare('SELECT id, name, source FROM playlists WHERE id = ?').get(id) as Row | undefined;
+	return r ? { id: num(r.id), name: str(r.name), source: str(r.source) } : null;
+}
+
+export function playlistTracks(id: number): Track[] {
+	return (
+		db
+			.prepare(
+				`SELECT ${TRACK_COLS_T} FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+				 WHERE pt.playlist_id = ? ORDER BY pt.position`
+			)
+			.all(id) as Row[]
+	).map(mapTrack);
 }

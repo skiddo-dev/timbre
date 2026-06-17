@@ -122,6 +122,27 @@ const MIGRATIONS: Migration[] = [
 			added_at TEXT NOT NULL
 		);
 		`
+	},
+	{
+		id: '004_playlists',
+		sql: `
+		ALTER TABLE tracks ADD COLUMN rating INTEGER;   -- 0..5 stars (from Music library import)
+
+		CREATE TABLE playlists (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			persistent_id TEXT UNIQUE,
+			source TEXT NOT NULL DEFAULT 'local',
+			created_at TEXT NOT NULL
+		);
+
+		CREATE TABLE playlist_tracks (
+			playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+			position INTEGER NOT NULL,
+			track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE
+		);
+		CREATE INDEX idx_playlist_tracks ON playlist_tracks(playlist_id, position);
+		`
 	}
 ];
 

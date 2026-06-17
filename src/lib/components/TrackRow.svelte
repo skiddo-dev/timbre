@@ -27,6 +27,7 @@
 		<span class="title">{track.title}</span>
 		{#if showArtist}<span class="artist muted">{track.artist}</span>{/if}
 	</button>
+	<span class="stars" title={track.rating ? `${track.rating}/5` : ''}>{track.rating ? '★'.repeat(track.rating) : ''}</span>
 	<button class="add" title="Add to queue" onclick={() => player.enqueue(track)}>＋</button>
 	<span class="dur mono muted">{formatDuration(track.durationMs)}</span>
 </div>
@@ -34,11 +35,17 @@
 <style>
 	.row {
 		display: grid;
-		grid-template-columns: 2.4rem 1fr auto auto;
+		grid-template-columns: 2.4rem 1fr auto auto auto;
 		align-items: center;
 		gap: 0.6rem;
 		padding: 0.3rem 0.5rem;
 		border-radius: var(--radius-sm);
+	}
+	.stars {
+		color: var(--accent);
+		font-size: 0.72rem;
+		letter-spacing: 1px;
+		white-space: nowrap;
 	}
 	.row:hover {
 		background: var(--surface-2);

@@ -23,6 +23,7 @@ export function stationToTrack(s: RadioStation): Track {
 		hasPeaks: false,
 		playCount: 0,
 		lastPlayedAt: null,
+		rating: null,
 		streamUrl: s.url,
 		isStream: true
 	};

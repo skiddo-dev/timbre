@@ -250,6 +250,42 @@ ok(sse.includes('"groups"'), 'SSE zone feed pushed an initial snapshot');
 const ap = await getJson('/api/airplay');
 ok(ap.enabled === false, 'AirPlay disabled by default');
 
+// 15) Apple Music / iTunes library import (ratings, play counts, playlists)
+const fileUrl = (file) => 'file://' + encodeURI(join(MUSIC_DIR, file));
+const xmlTracks = [
+	[1001, 'Verify Track One', 'Verify One.wav', 100, 7],
+	[1002, 'Verify Track Two', 'Verify Two.wav', 80, 3],
+	[1003, 'Verify Track Three', 'Verify Three.wav', 60, 1]
+];
+const tracksXml = xmlTracks
+	.map(([id, nm, file, rating, pc]) =>
+		`<key>${id}</key><dict><key>Track ID</key><integer>${id}</integer><key>Name</key><string>${nm}</string>` +
+		`<key>Rating</key><integer>${rating}</integer><key>Play Count</key><integer>${pc}</integer>` +
+		`<key>Location</key><string>${fileUrl(file)}</string></dict>`
+	)
+	.join('');
+const libraryXml =
+	`<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n` +
+	`<plist version="1.0"><dict><key>Tracks</key><dict>${tracksXml}</dict>` +
+	`<key>Playlists</key><array>` +
+	`<dict><key>Name</key><string>Verify Mix</string><key>Playlist Persistent ID</key><string>PIDVERIFY01</string>` +
+	`<key>Playlist Items</key><array><dict><key>Track ID</key><integer>1001</integer></dict><dict><key>Track ID</key><integer>1002</integer></dict></array></dict>` +
+	`<dict><key>Name</key><string>Library</string><key>Master</key><true/><key>Playlist Items</key><array><dict><key>Track ID</key><integer>1001</integer></dict></array></dict>` +
+	`</array></dict></plist>`;
+const xmlPath = '/tmp/timbre-verify-library.xml';
+writeFileSync(xmlPath, libraryXml);
+const imp = await (await fetch(`${BASE}/api/applemusic/import`, {
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify({ path: xmlPath })
+})).json();
+ok(imp.error == null, `library import ran (${imp.error ?? 'ok'})`);
+ok(imp.matched >= 3, `matched ${imp.matched} XML tracks to scanned files`);
+ok(imp.ratings >= 3, `imported ${imp.ratings} star ratings`);
+ok(imp.playlists === 1, `imported ${imp.playlists} playlist (Master library skipped)`);
+const plHtml = await (await fetch(`${BASE}/playlists`)).text();
+ok(/Verify Mix/.test(plHtml), '/playlists lists the imported playlist');
+
 mock.close();
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

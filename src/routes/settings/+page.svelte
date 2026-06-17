@@ -42,6 +42,31 @@
 		}, 700);
 	}
 
+	interface ImportResult {
+		matched: number;
+		ratings: number;
+		playCounts: number;
+		playlists: number;
+		unmatched: number;
+		error: string | null;
+	}
+	let xmlPath = $state('~/Music/Music/Library.xml');
+	let importing = $state(false);
+	let importResult = $state<ImportResult | null>(null);
+	async function importLibrary() {
+		importing = true;
+		importResult = null;
+		try {
+			importResult = await (await fetch('/api/applemusic/import', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ path: xmlPath })
+			})).json();
+		} finally {
+			importing = false;
+		}
+	}
+
 	async function save() {
 		saving = true;
 		saved = false;
@@ -176,6 +201,36 @@
 		<p class="muted mono small">{tags.scanned} / {tags.total} albums</p>
 	{:else if tags?.error}
 		<p class="err">{tags.error}</p>
+	{/if}
+</section>
+
+<section class="card">
+	<h2>Apple Music / iTunes library</h2>
+	<p class="muted small" style="margin-top:0">
+		Import <strong>playlists, star ratings and play counts</strong> from your Music library. First
+		set your music folder above and rescan, then export the XML from Music
+		(Settings → Advanced → “Share Library XML…”) and point to it here. Apple Music subscription
+		downloads are DRM-protected and are skipped.
+	</p>
+	<label class="field">
+		<span>Library XML path</span>
+		<input type="text" bind:value={xmlPath} placeholder="~/Music/Music/Library.xml" spellcheck="false" />
+	</label>
+	<div class="row">
+		<button class="btn btn-accent" onclick={importLibrary} disabled={importing}>
+			{importing ? 'Importing…' : 'Import library'}
+		</button>
+	</div>
+	{#if importResult}
+		{#if importResult.error}
+			<p class="err">{importResult.error}</p>
+		{:else}
+			<p class="muted small">
+				Matched {importResult.matched} tracks · {importResult.ratings} ratings ·
+				{importResult.playCounts} play counts · {importResult.playlists} playlists imported.
+				{#if importResult.unmatched}<br /><span class="faint">{importResult.unmatched} not in the library — scan their folder first.</span>{/if}
+			</p>
+		{/if}
 	{/if}
 </section>
 

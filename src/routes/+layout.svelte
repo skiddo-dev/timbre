@@ -9,6 +9,7 @@
 		{ href: '/', label: 'Home', icon: '◉' },
 		{ href: '/albums', label: 'Albums', icon: '▦' },
 		{ href: '/artists', label: 'Artists', icon: '☻' },
+		{ href: '/playlists', label: 'Playlists', icon: '≣' },
 		{ href: '/radio', label: 'Radio', icon: '◍' },
 		{ href: '/search', label: 'Search', icon: '⌕' },
 		{ href: '/zones', label: 'Zones', icon: '◫' },

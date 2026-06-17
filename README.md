@@ -29,6 +29,9 @@ library, artwork, playback, analysis — stays on that machine.
 - **Multi-room (Snapcast)** — the `/zones` screen manages synchronized, bit-perfect whole-home audio
   via [Snapcast](https://github.com/badaix/snapcast): group rooms, route streams, balance per-room
   volume, and cast the play queue to your rooms. Disabled until you set `SNAPCAST_HOST`.
+- **Apple Music / iTunes import** — bring your local Music library in: scan its media folder, then
+  import the `Library.xml` (Settings) to pull **playlists, star ratings, and play counts**. Fully
+  local, no account; Apple Music *subscription* downloads are DRM-locked and skipped.
 
 ## Quick start
 
