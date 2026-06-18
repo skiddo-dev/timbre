@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import type { ScanStatus } from '$lib/types';
+	import type { ScanStatus, LastfmStatus, Scrobble } from '$lib/types';
 
 	let { data }: { data: PageData } = $props();
 
@@ -65,6 +65,92 @@
 		} finally {
 			importing = false;
 		}
+	}
+
+	// ── Last.fm scrobbling ───────────────────────────────────────────────────
+	// svelte-ignore state_referenced_locally
+	let lf = $state<LastfmStatus>(data.lastfm);
+	// svelte-ignore state_referenced_locally
+	let scrobbles = $state<Scrobble[]>(data.scrobbles);
+	let lfToken = $state<string | null>(null); // pending auth token between the two connect steps
+	let lfBusy = $state(false);
+	let lfError = $state<string | null>(null);
+
+	async function lfPost(action: string, extra: Record<string, unknown> = {}) {
+		const res = await fetch('/api/lastfm', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action, ...extra })
+		});
+		if (!res.ok) {
+			const p = await res.json().catch(() => ({}));
+			throw new Error(p.message || 'Last.fm request failed.');
+		}
+		return res.json();
+	}
+
+	async function startConnect() {
+		lfBusy = true;
+		lfError = null;
+		try {
+			const { token, url } = await lfPost('connect');
+			lfToken = token;
+			window.open(url, '_blank', 'noopener'); // user authorizes Timbre over on Last.fm
+		} catch (e) {
+			lfError = (e as Error).message;
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function finishConnect() {
+		if (!lfToken) return;
+		lfBusy = true;
+		lfError = null;
+		try {
+			lf = await lfPost('session', { token: lfToken });
+			lfToken = null;
+			await refreshScrobbles();
+		} catch {
+			lfError = 'Authorization not completed yet — approve Timbre on Last.fm, then try again.';
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function disconnectLastfm() {
+		lfBusy = true;
+		lfError = null;
+		try {
+			lf = await lfPost('disconnect');
+			lfToken = null;
+		} catch (e) {
+			lfError = (e as Error).message;
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function retryQueue() {
+		lfBusy = true;
+		lfError = null;
+		try {
+			const p = await (await fetch('/api/scrobble', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ flush: true })
+			})).json();
+			if (p.status) lf = p.status;
+			await refreshScrobbles();
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function refreshScrobbles() {
+		const p = await (await fetch('/api/scrobble')).json();
+		if (p.status) lf = p.status;
+		scrobbles = p.scrobbles ?? scrobbles;
 	}
 
 	async function save() {
@@ -235,6 +321,66 @@
 </section>
 
 <section class="card">
+	<h2>Last.fm scrobbling</h2>
+	<p class="muted small" style="margin-top:0">
+		Scrobble what you play to your <strong>Last.fm</strong> profile. Opt-in, and the only cloud
+		connection in Timbre — plays are logged locally and retried if Last.fm is unreachable, so
+		nothing is lost offline.
+	</p>
+
+	{#if !lf.configured}
+		<p class="muted small">
+			Set <span class="mono">LASTFM_API_KEY</span> and <span class="mono">LASTFM_API_SECRET</span>
+			in your <span class="mono">.env</span> (create a key at
+			<a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">last.fm/api/account/create</a>),
+			then restart Timbre.
+		</p>
+	{:else if lf.connected}
+		<p class="muted small">
+			Connected as <strong>{lf.user || 'your account'}</strong>{#if lf.fake}
+				<span class="faint">(test mode)</span>{/if}.
+			{#if lf.pending > 0}<span class="faint"> · {lf.pending} queued</span>{/if}
+		</p>
+		<div class="row">
+			<button class="btn" onclick={disconnectLastfm} disabled={lfBusy}>Disconnect</button>
+			{#if lf.pending > 0}
+				<button class="btn" onclick={retryQueue} disabled={lfBusy}>
+					{lfBusy ? 'Retrying…' : `Retry ${lf.pending} queued`}
+				</button>
+			{/if}
+		</div>
+	{:else if !lfToken}
+		<div class="row">
+			<button class="btn btn-accent" onclick={startConnect} disabled={lfBusy}>
+				{lfBusy ? 'Starting…' : 'Connect Last.fm'}
+			</button>
+		</div>
+	{:else}
+		<p class="muted small">A Last.fm tab opened — approve Timbre there, then finish here:</p>
+		<div class="row">
+			<button class="btn btn-accent" onclick={finishConnect} disabled={lfBusy}>
+				{lfBusy ? 'Finishing…' : 'I’ve authorized — finish'}
+			</button>
+			<button class="btn" onclick={() => (lfToken = null)} disabled={lfBusy}>Cancel</button>
+		</div>
+	{/if}
+
+	{#if lfError}<p class="err">{lfError}</p>{/if}
+
+	{#if scrobbles.length}
+		<ul class="scrobbles">
+			{#each scrobbles as s (s.id)}
+				<li>
+					<span class="s-state {s.state}" title={s.error ?? s.state}></span>
+					<span class="s-title">{s.title}</span>
+					<span class="s-artist muted">{s.artist}</span>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+</section>
+
+<section class="card">
 	<h2>About</h2>
 	<ul class="about">
 		<li>Search index: <span class="mono">{data.ftsAvailable ? 'FTS5' : 'LIKE (fallback)'}</span></li>
@@ -321,5 +467,44 @@
 		color: var(--text-dim);
 		font-size: 0.9rem;
 		line-height: 1.7;
+	}
+	.scrobbles {
+		list-style: none;
+		margin: 0.9rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	.scrobbles li {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		font-size: 0.85rem;
+	}
+	.s-state {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex: none;
+		background: var(--text-faint);
+	}
+	.s-state.sent {
+		background: var(--good);
+	}
+	.s-state.pending {
+		background: var(--warn, #d08770);
+	}
+	.s-state.failed {
+		background: var(--bad);
+	}
+	.s-title {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 55%;
+	}
+	.s-artist {
+		font-size: 0.8rem;
 	}
 </style>

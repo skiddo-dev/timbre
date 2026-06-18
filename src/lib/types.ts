@@ -84,6 +84,26 @@ export interface PlayerState {
 	repeat: 'off' | 'all' | 'one';
 }
 
+// ── Last.fm scrobbling ───────────────────────────────────────────────────────
+export interface Scrobble {
+	id: number;
+	artist: string;
+	title: string;
+	album: string | null;
+	playedAt: number; // unix seconds
+	state: 'pending' | 'sent' | 'failed';
+	error: string | null;
+}
+
+export interface LastfmStatus {
+	configured: boolean; // app API key + secret present → the connect flow is available
+	connected: boolean; // a user session key is held → scrobbling is live
+	user: string | null; // the connected Last.fm username
+	fake: boolean; // TIMBRE_FAKE_LASTFM — offline deterministic mode (tests)
+	pending: number; // queued scrobbles not yet accepted by Last.fm
+	lastScrobbleAt: number | null; // unix seconds of the most recent accepted scrobble
+}
+
 export interface ScanStatus {
 	running: boolean;
 	scanned: number;

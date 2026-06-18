@@ -143,6 +143,31 @@ const MIGRATIONS: Migration[] = [
 		);
 		CREATE INDEX idx_playlist_tracks ON playlist_tracks(playlist_id, position);
 		`
+	},
+	{
+		// Last.fm scrobble log + offline queue. Each row is a metadata snapshot
+		// (so a scrobble survives the track being deleted) plus the played_at
+		// timestamp Last.fm wants. state walks 'pending' → 'sent' | 'failed';
+		// pending rows are retried whenever we reconnect or scrobble again, which
+		// is how scrobbling stays correct while the network or Last.fm is down.
+		id: '007_scrobbles',
+		sql: `
+		CREATE TABLE scrobbles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+			artist TEXT NOT NULL,
+			title TEXT NOT NULL,
+			album TEXT,
+			album_artist TEXT,
+			duration_sec INTEGER,
+			played_at INTEGER NOT NULL,            -- unix seconds (the timestamp Last.fm wants)
+			state TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'sent' | 'failed'
+			error TEXT,
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX idx_scrobbles_state ON scrobbles(state, played_at);
+		CREATE INDEX idx_scrobbles_recent ON scrobbles(played_at DESC);
+		`
 	}
 ];
 

@@ -3,7 +3,7 @@
 //
 //   rm -f /tmp/timbre.db*
 //   DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
-//     ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 \
+//     ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 TIMBRE_FAKE_LASTFM=1 \
 //     npm run dev -- --port 5181 &
 //   MUSIC_DIR=/tmp/timbre-verify-music node scripts/verify.mjs
 //
@@ -285,6 +285,56 @@ ok(imp.ratings >= 3, `imported ${imp.ratings} star ratings`);
 ok(imp.playlists === 1, `imported ${imp.playlists} playlist (Master library skipped)`);
 const plHtml = await (await fetch(`${BASE}/playlists`)).text();
 ok(/Verify Mix/.test(plHtml), '/playlists lists the imported playlist');
+
+// 16) Last.fm scrobbling (TIMBRE_FAKE_LASTFM → full offline flow; else status only)
+const lf0 = await getJson('/api/lastfm');
+ok(typeof lf0.connected === 'boolean' && typeof lf0.configured === 'boolean', 'lastfm status returns a shape');
+if (lf0.configured) {
+	const c = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'connect' })
+	})).json();
+	ok(typeof c.token === 'string' && /api\/auth/.test(c.url || ''), 'lastfm connect returns a token + auth url');
+	const sess = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'session', token: c.token })
+	})).json();
+	ok(sess.connected === true && typeof sess.user === 'string', `lastfm connected as ${sess.user}`);
+
+	const np = await (await fetch(`${BASE}/api/scrobble/nowplaying`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId: track.id })
+	})).json();
+	ok(np.ok === true, 'now-playing accepted while connected');
+
+	const sc = await (await fetch(`${BASE}/api/scrobble`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ trackId: track.id, startedAt: Math.floor(Date.now() / 1000) - 200 })
+	})).json();
+	ok(sc.ok === true && (sc.flush?.sent ?? 0) >= 1, `scrobble submitted + flushed (sent ${sc.flush?.sent ?? 0})`);
+	ok(sc.status?.pending === 0, 'no scrobbles left pending after flush');
+
+	const hist = await getJson('/api/scrobble');
+	ok((hist.scrobbles ?? []).some((s) => s.title === track.title && s.state === 'sent'), 'scrobble recorded in history as sent');
+
+	const disc = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'disconnect' })
+	})).json();
+	ok(disc.connected === false, 'disconnect clears the session');
+
+	// offline resilience: a play queues while disconnected, then drains on reconnect
+	const off = await (await fetch(`${BASE}/api/scrobble`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ trackId: s.tracks[1].id, startedAt: Math.floor(Date.now() / 1000) - 50 })
+	})).json();
+	ok(off.status?.connected === false && (off.status?.pending ?? 0) >= 1, `play queued while disconnected (pending ${off.status?.pending})`);
+	const re = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'connect' })
+	})).json();
+	const re2 = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'session', token: re.token })
+	})).json();
+	ok(re2.connected === true && re2.pending === 0, 'reconnect drains the queued scrobble');
+} else {
+	console.log('  (TIMBRE_FAKE_LASTFM not set & no Last.fm keys — scrobble flow skipped)');
+}
 
 mock.close();
 

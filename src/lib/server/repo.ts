@@ -200,6 +200,37 @@ export function markPlayed(id: number): void {
 	).run(new Date().toISOString(), id);
 }
 
+export interface ScrobbleTrack {
+	trackId: number;
+	artist: string;
+	title: string;
+	album: string | null;
+	albumArtist: string | null;
+	durationSec: number | null;
+}
+
+/** Metadata snapshot a track needs to be scrobbled to Last.fm, or null if unknown. */
+export function trackForScrobble(id: number): ScrobbleTrack | null {
+	const r = db
+		.prepare(
+			`SELECT t.id, t.artist, t.title, t.duration_ms,
+			        a.title AS album, a.album_artist AS album_artist
+			 FROM tracks t JOIN albums a ON a.id = t.album_id
+			 WHERE t.id = ?`
+		)
+		.get(id) as Row | undefined;
+	if (!r) return null;
+	const durMs = num(r.duration_ms);
+	return {
+		trackId: num(r.id),
+		artist: str(r.artist),
+		title: str(r.title),
+		album: strN(r.album),
+		albumArtist: strN(r.album_artist),
+		durationSec: durMs > 0 ? Math.round(durMs / 1000) : null
+	};
+}
+
 export interface LibraryStats {
 	artists: number;
 	albums: number;
