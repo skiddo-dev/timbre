@@ -25,8 +25,12 @@
 //   waveformPeaks(ptrIn, n, buckets, ptrOut) -> ()   Per-bucket max |sample| for
 //     the seek-bar waveform overview.
 //
-// Each kernel's JS twin lives below (f32 throughout via Math.fround) and is
-// asserted bit-exact against the wasm across several fixtures.
+//   yencDecode(ptrIn, n, ptrOut) -> i32   (returns decoded byte count)
+//     yEnc binary decode for Usenet article bodies (the Usenet downloader's hot
+//     loop — a single album part is millions of bytes). Byte-oriented, not f32.
+//
+// Each kernel's JS twin lives below (f32 / u8 throughout) and is asserted
+// bit-exact against the wasm across several fixtures.
 // ─────────────────────────────────────────────────────────────────────────────
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -74,8 +78,9 @@ const OP = {
   localGet: 0x20, localSet: 0x21, localTee: 0x22,
   i32Const: 0x41, f32Const: 0x43,
   f32Load: 0x2a, f32Store: 0x38,
+  i32Load8U: 0x2d, i32Store8: 0x3a,
   i32Add: 0x6a, i32Sub: 0x6b, i32Mul: 0x6c, i32DivS: 0x6d, i32Shl: 0x74,
-  i32LtS: 0x48, i32GeS: 0x4e,
+  i32Eq: 0x46, i32LtS: 0x48, i32GeS: 0x4e,
   f32Abs: 0x8b, f32Sqrt: 0x91, f32Add: 0x92, f32Sub: 0x93, f32Mul: 0x94, f32Div: 0x95,
   f32Min: 0x96, f32Max: 0x97,
   i32TruncF32S: 0xa8, f32ConvertI32S: 0xb2,
@@ -224,6 +229,41 @@ function buildWaveform() {
   return { params: [I32, I32, I32, I32], results: [], locals: [[4, I32], [2, F32]], body: B }
 }
 
+// ── yencDecode(): yEnc binary decode (Usenet article bodies) ──────────────────
+// in[] is the concatenated yEnc DATA bytes (caller strips =ybegin/=ypart/=yend
+// control lines, CRLFs and NNTP dot-stuffing first). Per byte: `=` (0x3D) escapes
+// the next byte as (next-64-42); otherwise the byte is (c-42); both mod 256 via the
+// 8-bit store. Returns the number of decoded bytes written at ptrOut.
+function buildYenc() {
+  const P = { ptrIn: 0, nIn: 1, ptrOut: 2 }
+  const L = { i: 3, j: 4, c: 5, d: 6 }
+  const { B, get, set, ic, op } = emitter()
+
+  ic(0); set(L.i)
+  ic(0); set(L.j)
+  op(OP.block, OP.EMPTY); op(OP.loop, OP.EMPTY)
+  get(L.i); get(P.nIn); op(OP.i32GeS); op(OP.br_if, 1)
+  // c = in[i]
+  get(P.ptrIn); get(L.i); op(OP.i32Add); op(OP.i32Load8U, 0, 0); set(L.c)
+  get(L.c); ic(0x3d); op(OP.i32Eq)
+  op(OP.if, OP.EMPTY)
+    // escape: consume next byte d, out[j] = d - 106  (= -64 -42)
+    get(L.i); ic(1); op(OP.i32Add); set(L.i)
+    get(P.ptrIn); get(L.i); op(OP.i32Add); op(OP.i32Load8U, 0, 0); set(L.d)
+    get(P.ptrOut); get(L.j); op(OP.i32Add); get(L.d); ic(106); op(OP.i32Sub); op(OP.i32Store8, 0, 0)
+  op(OP.else)
+    // out[j] = c - 42
+    get(P.ptrOut); get(L.j); op(OP.i32Add); get(L.c); ic(42); op(OP.i32Sub); op(OP.i32Store8, 0, 0)
+  op(OP.end)
+  get(L.j); ic(1); op(OP.i32Add); set(L.j)
+  get(L.i); ic(1); op(OP.i32Add); set(L.i)
+  op(OP.br, 0); op(OP.end); op(OP.end)
+  get(L.j)
+  op(OP.end)
+
+  return { params: [I32, I32, I32], results: [I32], locals: [[4, I32]], body: B }
+}
+
 // ── assemble module ──────────────────────────────────────────────────────────
 function assemble(funcs) {
   const typeSec = section(0x01, vec(funcs.map((f) => [0x60, ...vec(f.params.map((t) => [t])), ...vec((f.results || []).map((t) => [t]))])))
@@ -243,6 +283,7 @@ const funcs = [
   { name: 'blockPower', ...buildBlockPower() },
   { name: 'peak', ...buildPeak() },
   { name: 'waveformPeaks', ...buildWaveform() },
+  { name: 'yencDecode', ...buildYenc() },
 ]
 const wasm = assemble(funcs)
 if (!WebAssembly.validate(wasm)) throw new Error('module failed WebAssembly.validate()')
@@ -287,6 +328,27 @@ function waveformRef(out, inp, n, buckets) {
     for (let k = 0; k < bsize; k++) { const x = Math.abs(inp[start + k]); if (x > best) best = x }
     out[b] = fr(best)
   }
+}
+// yEnc decode reference (u8). Mirrors the wasm kernel exactly.
+function yencRef(out, inp, n) {
+  let j = 0
+  for (let i = 0; i < n; i++) {
+    const c = inp[i]
+    if (c === 0x3d) { i++; out[j++] = (inp[i] - 106) & 0xff }
+    else out[j++] = (c - 42) & 0xff
+  }
+  return j
+}
+// A minimal yEnc *encoder* (test fixtures only): the four critical bytes
+// (NUL, LF, CR, '=') must be escaped; everything else is (b+42) mod 256.
+function yencEncode(bytes) {
+  const out = []
+  for (const b of bytes) {
+    const e = (b + 42) & 0xff
+    if (e === 0x00 || e === 0x0a || e === 0x0d || e === 0x3d) out.push(0x3d, (e + 64) & 0xff)
+    else out.push(e)
+  }
+  return Uint8Array.from(out)
 }
 
 // ── instantiate + self-verify ────────────────────────────────────────────────
@@ -337,6 +399,13 @@ function runWaveform(inp, buckets) {
   inst.exports.waveformPeaks(0, n, buckets, n * 4)
   return new Float32Array(mem.buffer, n * 4, buckets).slice()
 }
+function runYenc(enc) {
+  const n = enc.length
+  const { mem, inst } = instantiate(n * 2 + 16) // out (<= n) lives at offset n
+  new Uint8Array(mem.buffer, 0, n).set(enc)
+  const m = inst.exports.yencDecode(0, n, n)
+  return new Uint8Array(mem.buffer, n, m).slice()
+}
 
 // K-weighting coefficients @48k (ITU-R BS.1770) — also the real-world use.
 const K1 = [1.53512485958697, -2.69169618940638, 1.19839281085285, -1.69065929318241, 0.73248077421585]
@@ -386,6 +455,29 @@ for (const [n, buckets, seed] of [[48000, 400, 4], [10000, 256, 6], [5000, 100, 
   waveformRef(exp, inp, n, buckets)
   for (let i = 0; i < buckets; i++) if (got[i] !== exp[i]) throw new Error(`waveform mismatch @${i}: wasm=${got[i]} js=${exp[i]}`)
 }
+// yencDecode — round-trip every random buffer (forces escapes) + the JS twin, and
+// confirm the full 0..255 byte alphabet survives an encode→decode cycle.
+for (const [n, seed] of [[256, 1], [4096, 2], [65537, 3]]) {
+  const next = rng(seed)
+  const orig = new Uint8Array(n)
+  for (let i = 0; i < n; i++) orig[i] = Math.floor(next() * 256) & 0xff
+  const enc = yencEncode(orig)
+  const got = runYenc(enc)
+  if (got.length !== n) throw new Error(`yenc length: wasm=${got.length} orig=${n}`)
+  const twin = new Uint8Array(enc.length)
+  const tn = yencRef(twin, enc, enc.length)
+  for (let i = 0; i < n; i++) {
+    if (got[i] !== orig[i]) throw new Error(`yenc mismatch @${i}: wasm=${got[i]} orig=${orig[i]}`)
+    if (twin[i] !== orig[i]) throw new Error(`yenc twin mismatch @${i}: js=${twin[i]} orig=${orig[i]}`)
+  }
+  if (tn !== n) throw new Error(`yenc twin length: js=${tn} orig=${n}`)
+}
+{
+  const all = new Uint8Array(256)
+  for (let i = 0; i < 256; i++) all[i] = i
+  const got = runYenc(yencEncode(all))
+  for (let i = 0; i < 256; i++) if (got[i] !== i) throw new Error(`yenc alphabet @${i}: got ${got[i]}`)
+}
 
 // informational perf: K-weight 5 min of 48k mono (the per-track hot path)
 {
@@ -396,6 +488,17 @@ for (const [n, buckets, seed] of [[48000, 400, 4], [10000, 256, 6], [5000, 100, 
   a = performance.now(); biquadRef(exp, inp, n, K1, [0, 0, 0, 0]); const tj = performance.now() - a
   console.log(`  biquad 5min 48k (${n.toLocaleString()} samples):  wasm ${tw.toFixed(0)}ms   js ${tj.toFixed(0)}ms   (${(tj / tw).toFixed(2)}×)`)
 }
+// informational perf: yEnc-decode a 32 MB article body (a real album part)
+{
+  const next = rng(1357)
+  const raw = new Uint8Array(32 * 1024 * 1024)
+  for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(next() * 256) & 0xff
+  const enc = yencEncode(raw)
+  let a = performance.now(); runYenc(enc); const tw = performance.now() - a
+  const twin = new Uint8Array(enc.length)
+  a = performance.now(); yencRef(twin, enc, enc.length); const tj = performance.now() - a
+  console.log(`  yencDecode 32MB body (${enc.length.toLocaleString()} enc bytes):  wasm ${tw.toFixed(0)}ms   js ${tj.toFixed(0)}ms   (${(tj / tw).toFixed(2)}×)`)
+}
 
 // ── write outputs ─────────────────────────────────────────────────────────────
 mkdirSync(dirname(OUT_WASM), { recursive: true })
@@ -405,8 +508,8 @@ writeFileSync(OUT_WASM, wasm)
 const b64 = Buffer.from(wasm).toString('base64')
 writeFileSync(OUT_BYTES,
   `// AUTO-GENERATED by scripts/gen-wasm-kernels.mjs — do not edit.\n` +
-  `// Timbre's loudness/DSP kernel (biquad + blockPower + peak + waveformPeaks),\n` +
-  `// base64-embedded so it loads without a filesystem lookup.\n` +
+  `// Timbre's loudness/DSP + Usenet kernel (biquad + blockPower + peak +\n` +
+  `// waveformPeaks + yencDecode), base64-embedded so it loads without a filesystem lookup.\n` +
   `export const KERNEL_BYTES: Uint8Array = Uint8Array.from(atob(\n` +
   `\t'${b64}'\n` +
   `), (c) => c.charCodeAt(0));\n`)
@@ -417,6 +520,6 @@ writeFileSync(OUT_VERSION,
   `export const KERNEL_VERSION = '${hash}';\n`)
 
 const rel = (p) => p.replace(ROOT + '/', '')
-console.log('✓ verified biquad + blockPower + peak + waveformPeaks match their f32 JS twins bit-for-bit')
-console.log(`✓ wrote ${rel(OUT_WASM)} (${wasm.length} bytes, 4 exports)`)
+console.log('✓ verified biquad + blockPower + peak + waveformPeaks + yencDecode match their JS twins bit-for-bit')
+console.log(`✓ wrote ${rel(OUT_WASM)} (${wasm.length} bytes, 5 exports)`)
 console.log(`✓ wrote ${rel(OUT_BYTES)} + ${rel(OUT_VERSION)} (v=${hash})`)

@@ -15,7 +15,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "gen:wasm": "node scripts/gen-wasm-kernels.mjs",
     "verify": "node scripts/verify.mjs",
-    "mock:snap": "node scripts/mock-snapserver.mjs"
+    "mock:snap": "node scripts/mock-snapserver.mjs",
+    "mock:usenet": "node scripts/mock-usenet.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.9",

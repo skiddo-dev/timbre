@@ -11,6 +11,7 @@
 		{ href: '/artists', label: 'Artists', icon: '☻' },
 		{ href: '/playlists', label: 'Playlists', icon: '≣' },
 		{ href: '/radio', label: 'Radio', icon: '◍' },
+		{ href: '/usenet', label: 'Usenet', icon: '⇣' },
 		{ href: '/search', label: 'Search', icon: '⌕' },
 		{ href: '/zones', label: 'Zones', icon: '◫' },
 		{ href: '/settings', label: 'Settings', icon: '⚙' }

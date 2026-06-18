@@ -134,3 +134,65 @@ export interface ZoneStatus {
 	streams: SnapStream[];
 	error: string | null;
 }
+
+// ── Usenet (NZB) acquisition ─────────────────────────────────────────────────
+export interface UsenetIndexer {
+	id: number;
+	name: string;
+	url: string; // Newznab API base
+	hasKey: boolean; // api_key is never sent to the client
+	enabled: boolean;
+}
+
+// A single search hit from a Newznab indexer (a grabbable release).
+export interface UsenetResult {
+	guid: string;
+	title: string;
+	indexerId: number;
+	indexerName: string;
+	nzbUrl: string; // get-link the downloader fetches / hands to SABnzbd
+	sizeBytes: number;
+	category: string;
+	pubDate: string | null;
+	grabs: number | null;
+}
+
+export type UsenetStatusValue =
+	| 'queued'
+	| 'downloading'
+	| 'verifying'
+	| 'extracting'
+	| 'importing'
+	| 'completed'
+	| 'failed';
+
+export interface UsenetDownload {
+	id: number;
+	title: string;
+	indexerId: number | null;
+	category: string;
+	sizeBytes: number;
+	engine: string; // 'sab' | 'nntp' | ''
+	status: UsenetStatusValue;
+	progress: number; // 0..100
+	bytesDone: number;
+	destDir: string | null;
+	files: number;
+	error: string | null;
+	createdAt: string;
+	updatedAt: string;
+	completedAt: string | null;
+}
+
+// Which acquisition engines are wired up (drives the /usenet UI hints).
+export interface UsenetEngines {
+	sab: boolean; // a SABnzbd/NZBGet client is configured (handles PAR2 + unrar)
+	nntp: boolean; // a direct NNTP provider is configured (built-in yEnc fallback)
+	indexers: number; // count of enabled indexers
+}
+
+export interface UsenetStatus {
+	indexers: UsenetIndexer[];
+	downloads: UsenetDownload[];
+	engines: UsenetEngines;
+}

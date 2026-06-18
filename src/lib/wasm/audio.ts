@@ -85,8 +85,47 @@ export function waveformPeaks(input: Float32Array, buckets: number): Float32Arra
 	}
 }
 
+/**
+ * yEnc binary decode for Usenet article bodies (see src/lib/server/usenet).
+ * `input` is the concatenated yEnc DATA bytes — the caller (nntp.ts) drops the
+ * =ybegin/=ypart/=yend control lines, CRLFs and NNTP dot-stuffing first.
+ *
+ * Honesty note: unlike the loudness DSP (float-compute-bound, ~2.5× in wasm), yEnc
+ * decode is a memory-bound byte loop where V8's JIT actually edges out wasm on a
+ * synthetic single call (see gen-wasm-kernels.mjs perf print). It doesn't matter:
+ * decode runs per-segment interleaved with NNTP transfer that dominates wall-clock,
+ * so both paths are free. We route through the hand-authored kernel for consistency
+ * and keep the bit-exact JS twin as the fallback, exactly like the DSP kernels.
+ */
+export function yencDecode(input: Uint8Array): Uint8Array {
+	const n = input.length;
+	if (n === 0) return new Uint8Array(0);
+	try {
+		const { mem, inst } = instance(n * 2 + 16); // output (≤ n) lives at offset n
+		new Uint8Array(mem.buffer, 0, n).set(input);
+		const m = (inst.exports.yencDecode as (i: number, n: number, o: number) => number)(0, n, n);
+		return new Uint8Array(mem.buffer, n, m).slice();
+	} catch {
+		return yencDecodeJS(input);
+	}
+}
+
 // ── JS twins (kept bit-exact by the generator's self-check) ──────────────────
 const fr = Math.fround;
+export function yencDecodeJS(input: Uint8Array): Uint8Array {
+	const out = new Uint8Array(input.length);
+	let j = 0;
+	for (let i = 0; i < input.length; i++) {
+		const c = input[i];
+		if (c === 0x3d) {
+			i++;
+			out[j++] = (input[i] - 106) & 0xff;
+		} else {
+			out[j++] = (c - 42) & 0xff;
+		}
+	}
+	return out.subarray(0, j);
+}
 export function biquadJS(input: Float32Array, c: BiquadCoeffs): Float32Array {
 	const n = input.length;
 	const out = new Float32Array(n);

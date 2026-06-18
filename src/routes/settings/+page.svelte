@@ -235,6 +235,24 @@
 </section>
 
 <section class="card">
+	<h2>Usenet</h2>
+	<p class="muted small" style="margin-top:0">
+		Search Newznab indexers and download releases straight into your library. Add a
+		<strong>SABnzbd</strong> client (<span class="mono">SABNZBD_URL</span> +
+		<span class="mono">SABNZBD_API_KEY</span>) for PAR2 repair + unrar, or an
+		<strong>NNTP</strong> provider (<span class="mono">NNTP_HOST…</span>) for the built-in yEnc
+		fallback. Manage indexers and grabs on the <a href="/usenet">Usenet</a> page.
+	</p>
+	<div class="row" style="flex-wrap:wrap; gap:0.5rem; margin-top:0.4rem">
+		<span class="u-pill" class:on={data.usenet.sab}>{data.usenet.sab ? '●' : '○'} SABnzbd client</span>
+		<span class="u-pill" class:on={data.usenet.nntp}>{data.usenet.nntp ? '●' : '○'} NNTP fallback</span>
+		<span class="u-pill" class:on={data.usenet.indexers > 0}>
+			{data.usenet.indexers} indexer{data.usenet.indexers === 1 ? '' : 's'}
+		</span>
+	</div>
+</section>
+
+<section class="card">
 	<h2>About</h2>
 	<ul class="about">
 		<li>Search index: <span class="mono">{data.ftsAvailable ? 'FTS5' : 'LIKE (fallback)'}</span></li>
@@ -321,5 +339,16 @@
 		color: var(--text-dim);
 		font-size: 0.9rem;
 		line-height: 1.7;
+	}
+	.u-pill {
+		font-size: 0.76rem;
+		padding: 0.2rem 0.6rem;
+		border-radius: 999px;
+		border: 1px solid var(--border-soft);
+		color: var(--text-faint);
+	}
+	.u-pill.on {
+		color: var(--text);
+		border-color: var(--accent-dim);
 	}
 </style>

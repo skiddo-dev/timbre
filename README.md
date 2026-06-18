@@ -32,6 +32,13 @@ library, artwork, playback, analysis — stays on that machine.
 - **Apple Music / iTunes import** — bring your local Music library in: scan its media folder, then
   import the `Library.xml` (Settings) to pull **playlists, star ratings, and play counts**. Fully
   local, no account; Apple Music *subscription* downloads are DRM-locked and skipped.
+- **Usenet (NZB) acquisition** — the `/usenet` screen searches your Newznab indexers, grabs a release,
+  and downloads it **straight into your library**. Two engines: a **SABnzbd / NZBGet** client (the
+  recommended primary — it does PAR2 repair + unrar) and a **built-in NNTP + yEnc** downloader (a
+  from-scratch RFC 3977 client whose decode hot-loop is a hand-authored WASM kernel, used when no
+  download client is set). Finished files land in `MUSIC_DIR/_usenet`, so the scanner ingests them as
+  ordinary local tracks. Indexers are added in the UI; everything's off until you configure an engine,
+  and search still works without one.
 
 ## Quick start
 
@@ -56,6 +63,8 @@ Open **Settings**, point Timbre at your music folder, hit **Rescan**, then (opti
 | `MUSICBRAINZ_UA` | Required User-Agent for MusicBrainz |
 | `TIMBRE_FAKE_ENRICH` | `1` → offline canned enrichment (tests) |
 | `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_MODEL` | Wired but unused until the M7 discovery brain |
+| `SABNZBD_URL` / `SABNZBD_API_KEY` | SABnzbd (or NZBGet) download client — the primary Usenet engine (PAR2 + unrar) |
+| `NNTP_HOST` / `NNTP_PORT` / `NNTP_SSL` / `NNTP_USER` / `NNTP_PASS` | Usenet provider for the built-in NNTP + yEnc fallback engine |
 
 ## Verify
 
@@ -63,12 +72,17 @@ Open **Settings**, point Timbre at your music folder, hit **Rescan**, then (opti
 rm -f /tmp/timbre.db*
 DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
   ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 \
-  npm run dev -- --port 5181 &
+  NNTP_HOST=127.0.0.1 NNTP_PORT=1819 NNTP_SSL=0 NNTP_USER=u NNTP_PASS=p \
+  SABNZBD_URL=http://127.0.0.1:1820 SABNZBD_API_KEY=mock \
+  npm run dev -- --port 5181 --host 127.0.0.1 &
 MUSIC_DIR=/tmp/timbre-verify-music npm run verify
 ```
 
 The harness writes tagged WAV fixtures, then asserts the full scan → stream(+Range) → search →
-album page → queue/player → enrich → loudness pipeline over HTTP.
+album page → queue/player → enrich → loudness → **Usenet** pipeline over HTTP. The Usenet section
+spins up mock Newznab / NNTP / SABnzbd servers (the `NNTP_*` / `SABNZBD_*` env points the dev server
+at them) and grabs a release through **both** engines, asserting the yEnc round-trip is byte-exact
+(NNTP → kernel → disk).
 
 ## Multi-room setup (Snapcast)
 
@@ -90,6 +104,31 @@ SNAPCAST_FIFO=/tmp/snapfifo
 No daemons handy? `npm run mock:snap` starts a fake snapserver so you can open `/zones` and click
 around. The audio feeder (decode → FIFO) needs `ffmpeg`; the control plane does not.
 
+## Usenet setup
+
+Add one or more Newznab-compatible indexers on the `/usenet` page (name + API base + key), then pick
+a download engine in `.env`:
+
+```bash
+# Recommended: a SABnzbd (or NZBGet) client does the NNTP fetch + PAR2 repair + unrar.
+# Point its completed/category folder INTO MUSIC_DIR so finished albums get scanned.
+SABNZBD_URL=http://127.0.0.1:8080
+SABNZBD_API_KEY=…
+
+# Fallback: Timbre's built-in NNTP + yEnc engine (used when no SABnzbd client is set).
+# Good for directly-posted audio; it shells out to par2/unrar/7z only if they're on PATH.
+NNTP_HOST=news.your-provider.com
+NNTP_PORT=563
+NNTP_SSL=1
+NNTP_USER=…
+NNTP_PASS=…
+```
+
+No provider handy? `npm run mock:usenet` starts fake Newznab + NNTP servers (point an indexer at
+`http://127.0.0.1:1818`) so you can search and grab through the built-in engine with nothing
+installed. The yEnc decode runs on the same hand-authored WASM kernel as the loudness scan
+(`npm run gen:wasm` self-verifies it bit-for-bit against a JS twin).
+
 ## Roadmap
 
 - ✅ **M7 — Local-AI discovery brain**: auto-tagging, Radio, natural-language Ask.
@@ -99,6 +138,8 @@ around. The audio feeder (decode → FIFO) needs `ffmpeg`; the control plane doe
   out of scope here).
 - ✅ **On-the-fly transcode** for exotic codecs, **live zone updates** (SSE, no more polling), and a
   best-effort **AirPlay output** via pyatv (`AIRPLAY_ENABLED=1`).
+- ✅ **Usenet (NZB) acquisition** (`/usenet`): Newznab search + a SABnzbd client and a from-scratch
+  NNTP + yEnc engine (with a hand-authored WASM decode kernel) → straight into the library.
 - Later: real streaming-service providers, richer DSP (parametric EQ / room correction), and
   unifying the browser player with the Snapcast/AirPlay output stages behind one transport.
 
@@ -106,5 +147,7 @@ around. The audio feeder (decode → FIFO) needs `ffmpeg`; the control plane doe
 
 `src/lib/server/` — `db.ts` (schema + migrations), `scan.ts` (indexer), `repo.ts` (all queries),
 `search.ts`, `enrich.ts`, `loudness.ts`, `playback.ts`, `settings.ts`, `llm.ts`.
+`src/lib/server/usenet/` — `indexer.ts` (Newznab search), `nzb.ts` + `yenc.ts` + `nntp.ts` (the
+built-in download engine), `sab.ts` (SABnzbd client), `downloads.ts` (engine-picking orchestrator).
 `src/lib/wasm/` — the kernel loader + JS twins (`scripts/gen-wasm-kernels.mjs` authors the bytes).
 `src/lib/audio/player.svelte.ts` — the client playback engine. `src/routes/` — pages + `/api`.

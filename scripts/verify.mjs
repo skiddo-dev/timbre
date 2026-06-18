@@ -4,14 +4,18 @@
 //   rm -f /tmp/timbre.db*
 //   DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
 //     ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 \
+//     NNTP_HOST=127.0.0.1 NNTP_PORT=1819 NNTP_SSL=0 NNTP_USER=u NNTP_PASS=p \
+//     SABNZBD_URL=http://127.0.0.1:1820 SABNZBD_API_KEY=mock \
 //     npm run dev -- --port 5181 &
 //   MUSIC_DIR=/tmp/timbre-verify-music node scripts/verify.mjs
 //
 // Writes tagged WAV fixtures into MUSIC_DIR, then drives the scan → stream(+Range)
-// → search → album page → queue/player → enrich → loudness pipeline over HTTP.
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+// → search → album page → queue/player → enrich → loudness → Usenet pipeline over
+// HTTP. The Usenet section needs the NNTP_*/SABNZBD_* env above (mock ports).
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockSnapserver } from './mock-snapserver.mjs';
+import { createMockNntp, createMockNewznab, createMockSab, buildNzb } from './mock-usenet.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:5181';
 const MUSIC_DIR = process.env.MUSIC_DIR || '/tmp/timbre-verify-music';
@@ -84,6 +88,37 @@ console.log(`wrote ${fixtures.length} tagged WAV fixtures to ${MUSIC_DIR}`);
 const mock = await createMockSnapserver(Number(process.env.SNAP_MOCK_PORT) || 1799);
 
 const getJson = async (p) => (await fetch(`${BASE}${p}`)).json();
+const post = (action, extra = {}) => ({
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify({ action, ...extra })
+});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Mirror of usenet/downloads.ts slug() — keep these in lockstep.
+const slugify = (title) =>
+	title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || `grab-x`;
+
+function readFileSafe(path) {
+	try {
+		return readFileSync(path);
+	} catch {
+		return null;
+	}
+}
+
+// Poll the Usenet download list until a grab with `title` finishes (or times out).
+async function pollDownload(title, timeoutMs = 25_000) {
+	const deadline = Date.now() + timeoutMs;
+	let last = null;
+	for (;;) {
+		const s = await getJson('/api/usenet');
+		last = (s.downloads || []).find((x) => x.title === title) || last;
+		if (last && (last.status === 'completed' || last.status === 'failed')) return last;
+		if (Date.now() > deadline) return last;
+		await sleep(300);
+	}
+}
 
 async function readFirstSse(path, timeoutMs) {
 	const ctrl = new AbortController();
@@ -285,6 +320,87 @@ ok(imp.ratings >= 3, `imported ${imp.ratings} star ratings`);
 ok(imp.playlists === 1, `imported ${imp.playlists} playlist (Master library skipped)`);
 const plHtml = await (await fetch(`${BASE}/playlists`)).text();
 ok(/Verify Mix/.test(plHtml), '/playlists lists the imported playlist');
+
+// 18) Usenet (NZB) acquisition — search a (mock) Newznab indexer, grab a release, and
+//     download it into the library by BOTH engines: the built-in NNTP + yEnc engine
+//     (drives the hand-authored kernel end-to-end) and a SABnzbd client. Both land a
+//     real tagged WAV under MUSIC_DIR/_usenet so the scanner ingests it as a track.
+{
+	const NNTP_PORT = Number(process.env.NNTP_PORT) || 1819;
+	const NZB_PORT = Number(process.env.USENET_NZB_PORT) || 1818;
+	const SAB_PORT = Number(process.env.USENET_SAB_PORT) || 1820;
+
+	const nntpWav = buildWav({ title: 'Usenet NNTP Track', artist: 'Usenet Test', album: 'Usenet NNTP Album', year: 2024, freq: 392 });
+	const sabWav = buildWav({ title: 'Usenet SAB Track', artist: 'Usenet Test', album: 'Usenet SAB Album', year: 2024, freq: 494 });
+	const nntpFile = 'Usenet NNTP.wav';
+	const sabFile = 'Usenet SAB.wav';
+	const msgId = 'usenet-verify-1@timbre.mock';
+	const group = 'alt.binaries.timbre';
+
+	const nntpMock = await createMockNntp({ port: NNTP_PORT, articles: new Map([[msgId, nntpWav]]) });
+	const sabMock = await createMockSab({ port: SAB_PORT, musicDir: MUSIC_DIR, fixture: { slug: 'usenet-sab', name: sabFile, bytes: sabWav } });
+	const nzMock = await createMockNewznab({
+		port: NZB_PORT,
+		items: [
+			{ guid: 'nntp-1', title: 'Usenet Test - Usenet NNTP Album', sizeBytes: nntpWav.length, nzb: buildNzb({ group, messageId: msgId, filename: nntpFile, bytes: nntpWav.length }) },
+			{ guid: 'sab-1', title: 'Usenet Test - Usenet SAB Album', sizeBytes: sabWav.length, nzb: buildNzb({ group, messageId: msgId, filename: sabFile, bytes: sabWav.length }) }
+		]
+	});
+
+	const eng0 = await getJson('/api/usenet');
+	if (!eng0.engines || (!eng0.engines.nntp && !eng0.engines.sab)) {
+		console.log('  (NNTP_*/SABNZBD_* not set on the dev server — Usenet download skipped)');
+	} else {
+		const addIx = await (await fetch(`${BASE}/api/usenet`, post('addIndexer', { name: 'Mock Indexer', url: `http://127.0.0.1:${NZB_PORT}`, apiKey: 'x' }))).json();
+		ok(addIx.indexers.some((i) => i.url === `http://127.0.0.1:${NZB_PORT}`), 'added a Newznab indexer');
+		ok(addIx.engines.indexers >= 1, 'engine status counts the indexer');
+
+		const sr = await getJson(`/api/usenet/search?q=${encodeURIComponent('Usenet')}`);
+		ok(Array.isArray(sr.results) && sr.results.length >= 2, `indexer search → ${sr.results?.length ?? 0} result(s)`);
+		const nntpHit = (sr.results || []).find((r) => /NNTP/.test(r.title));
+		const sabHit = (sr.results || []).find((r) => /SAB/.test(r.title));
+		ok(!!nntpHit && /^https?:/.test(nntpHit.nzbUrl || ''), 'result carries an nzb get-link');
+
+		// engine 1 — built-in NNTP + yEnc (the hand-authored kernel path)
+		if (eng0.engines.nntp && nntpHit) {
+			await (await fetch(`${BASE}/api/usenet`, post('grab', { title: nntpHit.title, nzbUrl: nntpHit.nzbUrl, indexerId: nntpHit.indexerId, sizeBytes: nntpHit.sizeBytes, engine: 'nntp' }))).json();
+			const d = await pollDownload(nntpHit.title);
+			ok(d?.status === 'completed', `NNTP grab completed (${d?.status}${d?.error ? ': ' + d.error : ''})`);
+			ok(d?.engine === 'nntp', `NNTP grab used the nntp engine (${d?.engine})`);
+			ok((d?.files ?? 0) >= 1, `NNTP grab imported ${d?.files ?? 0} file(s)`);
+
+			const onDisk = readFileSafe(join(MUSIC_DIR, '_usenet', slugify(nntpHit.title), nntpFile));
+			ok(
+				onDisk && onDisk.length === nntpWav.length && Buffer.compare(onDisk, Buffer.from(nntpWav)) === 0,
+				'yEnc round-trip is byte-exact (NNTP → kernel → disk)'
+			);
+			const found = await getJson(`/api/search?q=${encodeURIComponent('Usenet NNTP')}`);
+			ok((found.tracks ?? []).some((t) => t.title === 'Usenet NNTP Track'), 'downloaded NNTP track is in the library');
+		} else {
+			console.log('  (NNTP engine not configured — NNTP grab skipped)');
+		}
+
+		// engine 2 — SABnzbd client
+		if (eng0.engines.sab && sabHit) {
+			await (await fetch(`${BASE}/api/usenet`, post('grab', { title: sabHit.title, nzbUrl: sabHit.nzbUrl, indexerId: sabHit.indexerId, sizeBytes: sabHit.sizeBytes, engine: 'sab' }))).json();
+			const d = await pollDownload(sabHit.title);
+			ok(d?.status === 'completed', `SABnzbd grab completed (${d?.status}${d?.error ? ': ' + d.error : ''})`);
+			ok(d?.engine === 'sab', `SABnzbd grab used the sab engine (${d?.engine})`);
+			ok((d?.files ?? 0) >= 1, `SABnzbd grab imported ${d?.files ?? 0} file(s)`);
+			const found = await getJson(`/api/search?q=${encodeURIComponent('Usenet SAB')}`);
+			ok((found.tracks ?? []).some((t) => t.title === 'Usenet SAB Track'), 'downloaded SAB track is in the library');
+		} else {
+			console.log('  (SABnzbd client not configured — SAB grab skipped)');
+		}
+
+		const cleared = await (await fetch(`${BASE}/api/usenet`, post('clear'))).json();
+		ok((cleared.downloads || []).every((x) => x.status !== 'completed'), 'cleared finished downloads from history');
+	}
+
+	nntpMock.close();
+	sabMock.close();
+	nzMock.close();
+}
 
 mock.close();
 

@@ -143,6 +143,45 @@ const MIGRATIONS: Migration[] = [
 		);
 		CREATE INDEX idx_playlist_tracks ON playlist_tracks(playlist_id, position);
 		`
+	},
+	{
+		// Usenet (NZB) acquisition. `usenet_indexers` are the Newznab-compatible
+		// search sources (added from Settings, like radio stations). `usenet_downloads`
+		// is the grab queue/history: a release is searched → grabbed → fetched by the
+		// SABnzbd client or the built-in NNTP engine → its files land in
+		// MUSIC_DIR/_usenet/<slug> for the scanner to ingest as ordinary local tracks.
+		id: '009_usenet',
+		sql: `
+		CREATE TABLE usenet_indexers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			url TEXT NOT NULL,              -- Newznab base, e.g. https://api.nzbgeek.info
+			api_key TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			added_at TEXT NOT NULL
+		);
+
+		CREATE TABLE usenet_downloads (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			title TEXT NOT NULL,
+			indexer_id INTEGER REFERENCES usenet_indexers(id) ON DELETE SET NULL,
+			nzb_url TEXT NOT NULL,          -- indexer get-link for the .nzb
+			category TEXT NOT NULL DEFAULT 'music',
+			size_bytes INTEGER NOT NULL DEFAULT 0,
+			engine TEXT NOT NULL DEFAULT '',          -- 'sab' | 'nntp'
+			status TEXT NOT NULL DEFAULT 'queued',    -- queued|downloading|verifying|extracting|importing|completed|failed
+			progress INTEGER NOT NULL DEFAULT 0,      -- 0..100
+			bytes_done INTEGER NOT NULL DEFAULT 0,
+			client_id TEXT,                 -- SABnzbd nzo_id when engine='sab'
+			dest_dir TEXT,                  -- where files landed (under MUSIC_DIR)
+			files INTEGER NOT NULL DEFAULT 0,         -- audio files produced
+			error TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			completed_at TEXT
+		);
+		CREATE INDEX idx_usenet_downloads_created ON usenet_downloads(created_at DESC);
+		`
 	}
 ];
 
