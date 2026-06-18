@@ -220,7 +220,11 @@ async function upsertFromFile(
 }
 
 function pruneMissing(seen: Set<string>, s: ScanStatus): void {
-	const rows = db.prepare('SELECT id, path FROM tracks').all() as { id: number; path: string }[];
+	// Only local files are pruned by disk presence — non-local entries (e.g. 'blog'
+	// crate tracks) have synthetic paths and must survive a rescan.
+	const rows = db
+		.prepare(`SELECT id, path FROM tracks WHERE source = 'local'`)
+		.all() as { id: number; path: string }[];
 	const del = db.prepare('DELETE FROM tracks WHERE id = ?');
 	db.exec('BEGIN');
 	try {

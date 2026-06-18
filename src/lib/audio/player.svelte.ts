@@ -40,6 +40,11 @@ class Player {
 	#freq: Uint8Array<ArrayBuffer> | null = null;
 	#raf = 0;
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
+	// Scrobbling: unix-seconds the current play began, and whether we've already
+	// scrobbled it. Reset per track load (and per repeat-one replay), not on a
+	// pause/resume — so resuming the same track never double-scrobbles.
+	#playStartedAt = 0;
+	#scrobbled = false;
 
 	get current(): Track | null {
 		return this.index >= 0 && this.index < this.queue.length ? this.queue[this.index] : null;
@@ -99,6 +104,7 @@ class Player {
 			this.#audio.crossOrigin = 'anonymous';
 			this.#audio.addEventListener('timeupdate', () => {
 				this.positionMs = this.#audio!.currentTime * 1000;
+				this.#maybeScrobble();
 				this.#scheduleSave();
 			});
 			this.#audio.addEventListener('loadedmetadata', () => {
@@ -180,6 +186,8 @@ class Player {
 		this.#audio.src = track.streamUrl ?? `/api/stream/${track.id}`;
 		this.durationMs = track.durationMs;
 		this.positionMs = 0;
+		this.#playStartedAt = 0;
+		this.#scrobbled = false;
 		this.#applyGain();
 		if (autoplay) void this.#start(track);
 	}
@@ -190,15 +198,44 @@ class Player {
 		try {
 			await this.#audio.play();
 			if (!this.#raf) this.#raf = requestAnimationFrame(this.#tickLevel);
-			if (!track.streamUrl) fetch(`/api/tracks/${track.id}/played`, { method: 'POST' }).catch(() => {});
+			if (!track.streamUrl) {
+				fetch(`/api/tracks/${track.id}/played`, { method: 'POST' }).catch(() => {});
+				if (this.#playStartedAt === 0) this.#playStartedAt = Math.floor(Date.now() / 1000);
+				fetch('/api/scrobble/nowplaying', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ trackId: track.id })
+				}).catch(() => {});
+			}
 		} catch {
 			/* autoplay blocked — user can press play */
 		}
 	}
 
+	/** Scrobble the current track once it's been "consumed" — Last.fm's rule is
+	 * ≥30s long and played past the halfway point or 4 minutes, whichever first.
+	 * Local tracks only; fire-and-forget (the server queues + retries). */
+	#maybeScrobble() {
+		if (this.#scrobbled) return;
+		const t = this.current;
+		if (!t || t.streamUrl) return;
+		const dur = this.durationMs;
+		if (dur < 30_000) return;
+		if (this.positionMs < Math.min(dur / 2, 240_000)) return;
+		this.#scrobbled = true;
+		fetch('/api/scrobble', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ trackId: t.id, startedAt: this.#playStartedAt || undefined })
+		}).catch(() => {});
+	}
+
 	#onEnded() {
 		if (this.repeat === 'one') {
 			this.seek(0);
+			// A replay is a fresh play — let it scrobble again (#start re-stamps the time).
+			this.#playStartedAt = 0;
+			this.#scrobbled = false;
 			void this.#start(this.current!);
 			return;
 		}

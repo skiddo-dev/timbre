@@ -3,7 +3,8 @@
 //
 //   rm -f /tmp/timbre.db*
 //   DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
-//     ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 \
+//     ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 TIMBRE_FAKE_LASTFM=1 \
+//     TIMBRE_FAKE_APPLEMUSIC=1 \
 //     NNTP_HOST=127.0.0.1 NNTP_PORT=1819 NNTP_SSL=0 NNTP_USER=u NNTP_PASS=p \
 //     SABNZBD_URL=http://127.0.0.1:1820 SABNZBD_API_KEY=mock \
 //     npm run dev -- --port 5181 &
@@ -185,12 +186,21 @@ ok(ps.currentTrackId === ids[0] && ps.positionMs === 1234 && ps.volume === 0.5, 
 const played = await fetch(`${BASE}/api/tracks/${track.id}/played`, { method: 'POST' });
 ok(played.ok, `mark played → ${played.status}`);
 
-// 7) enrichment (fake → deterministic, offline)
+// 7) enrichment (fake → deterministic, offline). MusicBrainz facts + genres persist
+//    alongside the Wikipedia bio / Cover Art Archive cover.
 const artistId = sa.artists[0].id;
 const enr = await (await fetch(`${BASE}/api/artists/${artistId}/enrich`, { method: 'POST' })).json();
 ok(enr.mbid === 'fake-artist-mbid' && typeof enr.bio === 'string', 'artist enrichment returns fake bio');
+ok(enr.type === 'Group' && enr.country === 'US' && enr.genres.includes('rock'), 'artist enrichment carries MusicBrainz facts + genres');
 const artistHtml = await (await fetch(`${BASE}/artists/${artistId}`)).text();
 ok(/offline enrichment fixture/i.test(artistHtml), 'artist page shows the fetched bio');
+ok(/Group/.test(artistHtml) && /rock/.test(artistHtml), 'artist page shows MusicBrainz facts + genre chips');
+
+const ea = await (await fetch(`${BASE}/api/albums/${track.albumId}/enrich`, { method: 'POST' })).json();
+ok(ea.mbid === 'fake-album-mbid' && ea.primaryType === 'Album', 'album enrichment returns MusicBrainz release info');
+ok(ea.genres.includes('rock') && typeof ea.year === 'number', 'album enrichment carries genres + a year');
+const albumEnrHtml = await (await fetch(`${BASE}/albums/${track.albumId}`)).text();
+ok(/rock/.test(albumEnrHtml), 'album page shows the MusicBrainz genre chip');
 
 // 8) loudness (only if ffmpeg is available — otherwise gracefully skipped)
 const loud = await (await fetch(`${BASE}/api/loudness?wait=1`, { method: 'POST' })).json();
@@ -320,6 +330,100 @@ ok(imp.ratings >= 3, `imported ${imp.ratings} star ratings`);
 ok(imp.playlists === 1, `imported ${imp.playlists} playlist (Master library skipped)`);
 const plHtml = await (await fetch(`${BASE}/playlists`)).text();
 ok(/Verify Mix/.test(plHtml), '/playlists lists the imported playlist');
+
+// 16) Last.fm scrobbling (TIMBRE_FAKE_LASTFM → full offline flow; else status only)
+const lf0 = await getJson('/api/lastfm');
+ok(typeof lf0.connected === 'boolean' && typeof lf0.configured === 'boolean', 'lastfm status returns a shape');
+if (lf0.configured) {
+	const c = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'connect' })
+	})).json();
+	ok(typeof c.token === 'string' && /api\/auth/.test(c.url || ''), 'lastfm connect returns a token + auth url');
+	const sess = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'session', token: c.token })
+	})).json();
+	ok(sess.connected === true && typeof sess.user === 'string', `lastfm connected as ${sess.user}`);
+
+	const np = await (await fetch(`${BASE}/api/scrobble/nowplaying`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId: track.id })
+	})).json();
+	ok(np.ok === true, 'now-playing accepted while connected');
+
+	const sc = await (await fetch(`${BASE}/api/scrobble`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ trackId: track.id, startedAt: Math.floor(Date.now() / 1000) - 200 })
+	})).json();
+	ok(sc.ok === true && (sc.flush?.sent ?? 0) >= 1, `scrobble submitted + flushed (sent ${sc.flush?.sent ?? 0})`);
+	ok(sc.status?.pending === 0, 'no scrobbles left pending after flush');
+
+	const hist = await getJson('/api/scrobble');
+	ok((hist.scrobbles ?? []).some((s) => s.title === track.title && s.state === 'sent'), 'scrobble recorded in history as sent');
+
+	const disc = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'disconnect' })
+	})).json();
+	ok(disc.connected === false, 'disconnect clears the session');
+
+	// offline resilience: a play queues while disconnected, then drains on reconnect
+	const off = await (await fetch(`${BASE}/api/scrobble`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ trackId: s.tracks[1].id, startedAt: Math.floor(Date.now() / 1000) - 50 })
+	})).json();
+	ok(off.status?.connected === false && (off.status?.pending ?? 0) >= 1, `play queued while disconnected (pending ${off.status?.pending})`);
+	const re = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'connect' })
+	})).json();
+	const re2 = await (await fetch(`${BASE}/api/lastfm`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'session', token: re.token })
+	})).json();
+	ok(re2.connected === true && re2.pending === 0, 'reconnect drains the queued scrobble');
+} else {
+	console.log('  (TIMBRE_FAKE_LASTFM not set & no Last.fm keys — scrobble flow skipped)');
+}
+
+// 17) Apple Music subscription — enrichment + library sync, deep-link out
+//     (TIMBRE_FAKE_APPLEMUSIC → full offline flow; else status only). The whole
+//     posture: matches reconcile to LOCAL files, catalog-only songs become
+//     non-playable deep-link rows — DRM audio never enters the player pipeline.
+const am0 = await getJson('/api/applemusic');
+ok(typeof am0.configured === 'boolean' && typeof am0.connected === 'boolean', 'apple music status returns a shape');
+if (am0.configured) {
+	const dt = await (await fetch(`${BASE}/api/applemusic`, post('devtoken'))).json();
+	ok(typeof dt.token === 'string' && dt.token.length > 0, 'apple music mints a developer token');
+
+	const sess = await (await fetch(`${BASE}/api/applemusic`, post('session', { userToken: 'fake-user-token', storefront: 'us' }))).json();
+	ok(sess.connected === true, 'apple music connected with a Music User Token');
+
+	const sync = await (await fetch(`${BASE}/api/applemusic`, post('sync'))).json();
+	ok(sync.matched >= 1, `sync reconciled ${sync.matched} song(s) to local files`);
+	ok(sync.wishlist >= 1, `sync added ${sync.wishlist} catalog-only deep-link row(s)`);
+	ok(sync.playlists >= 1, `sync mirrored ${sync.playlists} playlist(s)`);
+	ok(!!sync.status?.lastSyncAt, 'last-sync time recorded');
+
+	// the catalog-only song is an applemusic deep-link row that does NOT play
+	const ghost = await getJson(`/api/search?q=${encodeURIComponent('Ghost Single')}`);
+	const wish = (ghost.tracks ?? []).find((t) => t.title === 'Ghost Single');
+	ok(!!wish && wish.source === 'applemusic' && !!wish.sourceUrl, 'catalog-only track is an applemusic deep-link row');
+	if (wish) {
+		const play = await fetch(`${BASE}/api/stream/${wish.id}`);
+		ok(play.status === 404, `wishlist track is non-playable (stream → ${play.status})`);
+	}
+	const plHtml2 = await (await fetch(`${BASE}/playlists`)).text();
+	ok(/Apple Faves/.test(plHtml2), '/playlists lists the synced Apple playlist');
+
+	// catalog enrichment fills the album's Apple id + genres + deep link (COALESCE)
+	const enrApple = await (await fetch(`${BASE}/api/applemusic`, post('enrich', { albumId: track.albumId }))).json();
+	ok(typeof enrApple.appleId === 'string' && enrApple.appleId.length > 0, 'apple enrich returns a catalog id');
+	ok(!!enrApple.appleUrl && /music\.apple\.com/.test(enrApple.appleUrl), 'apple enrich returns a deep link');
+	ok(Array.isArray(enrApple.genres) && enrApple.genres.includes('Alternative'), 'apple enrich carries catalog genres');
+	const albAppleHtml = await (await fetch(`${BASE}/albums/${track.albumId}`)).text();
+	ok(/Apple Music/.test(albAppleHtml), 'album page shows the Apple Music deep link');
+
+	const amDisc = await (await fetch(`${BASE}/api/applemusic`, post('disconnect'))).json();
+	ok(amDisc.connected === false, 'apple music disconnect clears the user token');
+} else {
+	console.log('  (TIMBRE_FAKE_APPLEMUSIC not set & no Apple keys — subscription flow skipped)');
+}
 
 // 18) Usenet (NZB) acquisition — search a (mock) Newznab indexer, grab a release, and
 //     download it into the library by BOTH engines: the built-in NNTP + yEnc engine

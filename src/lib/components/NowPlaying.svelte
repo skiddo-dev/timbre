@@ -245,7 +245,7 @@
 	.art {
 		width: 52px;
 		flex: none;
-		border-radius: var(--radius-sm);
+		border-radius: 0;
 		overflow: hidden;
 		box-shadow: var(--shadow-sm), 0 0 0 1px rgb(var(--art) / 0.3), 0 6px 20px -8px rgb(var(--art) / 0.55);
 		transition: box-shadow 0.6s ease, transform 0.15s ease;

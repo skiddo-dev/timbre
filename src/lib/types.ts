@@ -8,6 +8,12 @@ export interface Artist {
 	mbid: string | null;
 	bio: string | null;
 	hasImage: boolean;
+	// Factual metadata from MusicBrainz (null until enrichment runs).
+	mbType: string | null; // 'Person' | 'Group' | …
+	country: string | null; // ISO 3166 code, e.g. 'US'
+	beginYear: number | null;
+	endYear: number | null;
+	genres: string[]; // MusicBrainz genres/tags, most-tagged first
 }
 
 export interface Album {
@@ -26,6 +32,15 @@ export interface Album {
 	mood: string | null;
 	tags: string[];
 	descriptor: string | null;
+	// Factual metadata from MusicBrainz (null until enrichment runs).
+	mbPrimaryType: string | null; // 'Album' | 'EP' | 'Single' | …
+	mbSecondaryTypes: string[]; // e.g. ['Live', 'Compilation']
+	firstReleased: string | null; // MB first-release-date (YYYY[-MM[-DD]])
+	mbGenres: string[]; // MusicBrainz genres/tags, most-tagged first
+	// Apple Music catalog link (null until an Apple enrichment runs). A metadata
+	// source only — appleUrl deep-links out to Apple Music, nothing streams in.
+	appleId: string | null;
+	appleUrl: string | null;
 }
 
 export interface Track {
@@ -54,6 +69,14 @@ export interface Track {
 	// directly instead of /api/stream/[id] (e.g. internet radio).
 	streamUrl?: string;
 	isStream?: boolean;
+	// Where this track came from: 'local' (a scanned file) by default, or a tag like
+	// 'blog' for curated, non-playable crate entries, or 'applemusic' for a synced
+	// catalog track with no local file (a deep-link "wishlist" row). sourceUrl links back.
+	source?: string;
+	sourceUrl?: string | null;
+	// Apple Music catalog link (deep-link out; never a stream into Timbre's pipeline).
+	appleId?: string | null;
+	appleUrl?: string | null;
 }
 
 export interface RadioStation {
@@ -82,6 +105,51 @@ export interface PlayerState {
 	volume: number; // 0..1
 	shuffle: boolean;
 	repeat: 'off' | 'all' | 'one';
+}
+
+// ── Last.fm scrobbling ───────────────────────────────────────────────────────
+export interface Scrobble {
+	id: number;
+	artist: string;
+	title: string;
+	album: string | null;
+	playedAt: number; // unix seconds
+	state: 'pending' | 'sent' | 'failed';
+	error: string | null;
+}
+
+export interface LastfmStatus {
+	configured: boolean; // app API key + secret present → the connect flow is available
+	connected: boolean; // a user session key is held → scrobbling is live
+	user: string | null; // the connected Last.fm username
+	fake: boolean; // TIMBRE_FAKE_LASTFM — offline deterministic mode (tests)
+	pending: number; // queued scrobbles not yet accepted by Last.fm
+	lastScrobbleAt: number | null; // unix seconds of the most recent accepted scrobble
+}
+
+// ── Apple Music subscription (enrichment + library sync; never a player) ───────
+export interface AppleMusicStatus {
+	configured: boolean; // dev-token keys present (or fake) → catalog enrichment is available
+	connected: boolean; // a Music User Token is held → library/playlist sync is available
+	fake: boolean; // TIMBRE_FAKE_APPLEMUSIC — offline deterministic mode (tests)
+	storefront: string; // e.g. 'us' — which Apple Music catalog to read
+	lastSyncAt: string | null; // ISO time of the last library sync
+}
+
+export interface AppleSyncResult {
+	matched: number; // library songs reconciled to a local file
+	wishlist: number; // catalog-only songs added as deep-link rows (no local file)
+	playlists: number; // library playlists mirrored
+	error: string | null;
+}
+
+export interface AppleEnrichResult {
+	appleId: string | null;
+	appleUrl: string | null;
+	art: boolean; // an artwork was fetched/kept
+	genres: string[]; // Apple catalog genreNames
+	editorial: boolean; // an editorial note filled the descriptor
+	error: string | null;
 }
 
 export interface ScanStatus {

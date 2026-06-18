@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import type { ScanStatus } from '$lib/types';
+	import type { ScanStatus, LastfmStatus, Scrobble, AppleMusicStatus, AppleSyncResult } from '$lib/types';
 
 	let { data }: { data: PageData } = $props();
 
@@ -64,6 +64,195 @@
 			})).json();
 		} finally {
 			importing = false;
+		}
+	}
+
+	// ── Last.fm scrobbling ───────────────────────────────────────────────────
+	// svelte-ignore state_referenced_locally
+	let lf = $state<LastfmStatus>(data.lastfm);
+	// svelte-ignore state_referenced_locally
+	let scrobbles = $state<Scrobble[]>(data.scrobbles);
+	let lfToken = $state<string | null>(null); // pending auth token between the two connect steps
+	let lfBusy = $state(false);
+	let lfError = $state<string | null>(null);
+
+	async function lfPost(action: string, extra: Record<string, unknown> = {}) {
+		const res = await fetch('/api/lastfm', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action, ...extra })
+		});
+		if (!res.ok) {
+			const p = await res.json().catch(() => ({}));
+			throw new Error(p.message || 'Last.fm request failed.');
+		}
+		return res.json();
+	}
+
+	async function startConnect() {
+		lfBusy = true;
+		lfError = null;
+		try {
+			const { token, url } = await lfPost('connect');
+			lfToken = token;
+			window.open(url, '_blank', 'noopener'); // user authorizes Timbre over on Last.fm
+		} catch (e) {
+			lfError = (e as Error).message;
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function finishConnect() {
+		if (!lfToken) return;
+		lfBusy = true;
+		lfError = null;
+		try {
+			lf = await lfPost('session', { token: lfToken });
+			lfToken = null;
+			await refreshScrobbles();
+		} catch {
+			lfError = 'Authorization not completed yet — approve Timbre on Last.fm, then try again.';
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function disconnectLastfm() {
+		lfBusy = true;
+		lfError = null;
+		try {
+			lf = await lfPost('disconnect');
+			lfToken = null;
+		} catch (e) {
+			lfError = (e as Error).message;
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function retryQueue() {
+		lfBusy = true;
+		lfError = null;
+		try {
+			const p = await (await fetch('/api/scrobble', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ flush: true })
+			})).json();
+			if (p.status) lf = p.status;
+			await refreshScrobbles();
+		} finally {
+			lfBusy = false;
+		}
+	}
+
+	async function refreshScrobbles() {
+		const p = await (await fetch('/api/scrobble')).json();
+		if (p.status) lf = p.status;
+		scrobbles = p.scrobbles ?? scrobbles;
+	}
+
+	// ── Apple Music subscription (enrichment + library sync) ──────────────────
+	// svelte-ignore state_referenced_locally
+	let am = $state<AppleMusicStatus>(data.appleMusic);
+	let amBusy = $state(false);
+	let amError = $state<string | null>(null);
+	let amSync = $state<AppleSyncResult | null>(null);
+	let amEnrich = $state<{ enriched: number; total: number; error: string | null } | null>(null);
+
+	async function amPost(action: string, extra: Record<string, unknown> = {}) {
+		const res = await fetch('/api/applemusic', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action, ...extra })
+		});
+		if (!res.ok) {
+			const p = await res.json().catch(() => ({}));
+			throw new Error(p.message || 'Apple Music request failed.');
+		}
+		return res.json();
+	}
+
+	// Load Apple's MusicKit JS, configure it with our developer token, and return
+	// the instance. Only ever called in live mode — fake mode skips the browser SDK.
+	async function loadMusicKit(devToken: string): Promise<{ authorize: () => Promise<string> }> {
+		const w = window as unknown as { MusicKit?: { configure: (o: unknown) => Promise<{ authorize: () => Promise<string> }> } };
+		if (!w.MusicKit) {
+			await new Promise<void>((resolve, reject) => {
+				const s = document.createElement('script');
+				s.src = 'https://js-cdn.music.apple.com/musickit/v3/musickit.js';
+				s.async = true;
+				s.addEventListener('load', () => resolve());
+				s.addEventListener('error', () => reject(new Error('Could not load MusicKit JS.')));
+				document.head.appendChild(s);
+			});
+			if (!w.MusicKit) {
+				await new Promise<void>((r) => document.addEventListener('musickitloaded', () => r(), { once: true }));
+			}
+		}
+		return w.MusicKit!.configure({ developerToken: devToken, app: { name: 'Timbre', build: '1.0.0' } });
+	}
+
+	async function connectApple() {
+		amBusy = true;
+		amError = null;
+		try {
+			const { token } = await amPost('devtoken');
+			if (am.fake) {
+				am = await amPost('session', { userToken: 'fake-user-token', storefront: 'us' });
+				return;
+			}
+			const music = await loadMusicKit(token);
+			const userToken = await music.authorize(); // opens Apple sign-in for the subscription
+			am = await amPost('session', { userToken, storefront: am.storefront });
+		} catch (e) {
+			amError = (e as Error).message || 'Could not connect Apple Music.';
+		} finally {
+			amBusy = false;
+		}
+	}
+
+	async function syncApple() {
+		amBusy = true;
+		amError = null;
+		amSync = null;
+		try {
+			const r = await amPost('sync');
+			amSync = r;
+			if (r.status) am = r.status;
+			stats = (await (await fetch('/api/settings')).json()).stats;
+		} catch (e) {
+			amError = (e as Error).message;
+		} finally {
+			amBusy = false;
+		}
+	}
+
+	async function enrichApple() {
+		amBusy = true;
+		amError = null;
+		amEnrich = null;
+		try {
+			amEnrich = await amPost('enrich-all', { limit: 0 });
+		} catch (e) {
+			amError = (e as Error).message;
+		} finally {
+			amBusy = false;
+		}
+	}
+
+	async function disconnectApple() {
+		amBusy = true;
+		amError = null;
+		try {
+			am = await amPost('disconnect');
+			amSync = null;
+			amEnrich = null;
+		} catch (e) {
+			amError = (e as Error).message;
+		} finally {
+			amBusy = false;
 		}
 	}
 
@@ -209,8 +398,8 @@
 	<p class="muted small" style="margin-top:0">
 		Import <strong>playlists, star ratings and play counts</strong> from your Music library. First
 		set your music folder above and rescan, then export the XML from Music
-		(Settings → Advanced → “Share Library XML…”) and point to it here. Apple Music subscription
-		downloads are DRM-protected and are skipped.
+		(Settings → Advanced → “Share Library XML…”) and point to it here. (To link an Apple Music
+		<em>subscription</em> live, see the card below.)
 	</p>
 	<label class="field">
 		<span>Library XML path</span>
@@ -231,6 +420,121 @@
 				{#if importResult.unmatched}<br /><span class="faint">{importResult.unmatched} not in the library — scan their folder first.</span>{/if}
 			</p>
 		{/if}
+	{/if}
+</section>
+
+<section class="card">
+	<h2>Apple Music subscription</h2>
+	<p class="muted small" style="margin-top:0">
+		Use your <strong>Apple Music</strong> subscription as a <strong>metadata &amp; library source</strong>:
+		it enriches your local albums (artwork, genres, editorial notes) and mirrors your Apple library &amp;
+		playlists onto your local files. Nothing streams <em>in</em> — catalog audio is DRM and would bypass
+		Timbre's leveling / bit-perfect pipeline, so catalog-only tracks become <strong>deep-link</strong> rows
+		that open in Apple Music. Opt-in, and every play still comes from a local file.
+	</p>
+
+	{#if !am.configured}
+		<p class="muted small">
+			Needs an <a href="https://developer.apple.com/programs/" target="_blank" rel="noopener">Apple
+			Developer Program</a> membership: create a <strong>MusicKit key</strong>, then set
+			<span class="mono">APPLE_MUSIC_TEAM_ID</span>, <span class="mono">APPLE_MUSIC_KEY_ID</span> and
+			<span class="mono">APPLE_MUSIC_PRIVATE_KEY</span> (the <span class="mono">.p8</span> contents) in your
+			<span class="mono">.env</span>, then restart Timbre.
+		</p>
+	{:else if am.connected}
+		<p class="muted small">
+			Connected · catalog <span class="mono">{am.storefront}</span>{#if am.fake}
+				<span class="faint">(test mode)</span>{/if}.
+			{#if am.lastSyncAt}<span class="faint"> · last sync {new Date(am.lastSyncAt).toLocaleString()}</span>{/if}
+		</p>
+		<div class="row">
+			<button class="btn btn-accent" onclick={syncApple} disabled={amBusy}>
+				{amBusy ? 'Working…' : 'Sync library now'}
+			</button>
+			<button class="btn" onclick={enrichApple} disabled={amBusy}>Enrich art &amp; genres</button>
+			<button class="btn" onclick={disconnectApple} disabled={amBusy}>Disconnect</button>
+		</div>
+		{#if amSync}
+			<p class="muted small">
+				Synced {amSync.matched} matched to local files · {amSync.wishlist} catalog-only
+				(deep-link) · {amSync.playlists} playlists.
+			</p>
+		{/if}
+		{#if amEnrich && !amEnrich.error}
+			<p class="muted small">Enriched {amEnrich.enriched} / {amEnrich.total} albums from Apple's catalog.</p>
+		{/if}
+	{:else}
+		<p class="muted small">
+			Connect the Apple ID that holds your subscription. A sign-in window opens; Timbre stores only the
+			resulting access token, never your password.
+		</p>
+		<div class="row">
+			<button class="btn btn-accent" onclick={connectApple} disabled={amBusy}>
+				{amBusy ? 'Connecting…' : 'Connect Apple Music'}
+			</button>
+		</div>
+	{/if}
+
+	{#if amError}<p class="err">{amError}</p>{/if}
+</section>
+
+<section class="card">
+	<h2>Last.fm scrobbling</h2>
+	<p class="muted small" style="margin-top:0">
+		Scrobble what you play to your <strong>Last.fm</strong> profile. Opt-in, and the only cloud
+		connection in Timbre — plays are logged locally and retried if Last.fm is unreachable, so
+		nothing is lost offline.
+	</p>
+
+	{#if !lf.configured}
+		<p class="muted small">
+			Set <span class="mono">LASTFM_API_KEY</span> and <span class="mono">LASTFM_API_SECRET</span>
+			in your <span class="mono">.env</span> (create a key at
+			<a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">last.fm/api/account/create</a>),
+			then restart Timbre.
+		</p>
+	{:else if lf.connected}
+		<p class="muted small">
+			Connected as <strong>{lf.user || 'your account'}</strong>{#if lf.fake}
+				<span class="faint">(test mode)</span>{/if}.
+			{#if lf.pending > 0}<span class="faint"> · {lf.pending} queued</span>{/if}
+		</p>
+		<div class="row">
+			<button class="btn" onclick={disconnectLastfm} disabled={lfBusy}>Disconnect</button>
+			{#if lf.pending > 0}
+				<button class="btn" onclick={retryQueue} disabled={lfBusy}>
+					{lfBusy ? 'Retrying…' : `Retry ${lf.pending} queued`}
+				</button>
+			{/if}
+		</div>
+	{:else if !lfToken}
+		<div class="row">
+			<button class="btn btn-accent" onclick={startConnect} disabled={lfBusy}>
+				{lfBusy ? 'Starting…' : 'Connect Last.fm'}
+			</button>
+		</div>
+	{:else}
+		<p class="muted small">A Last.fm tab opened — approve Timbre there, then finish here:</p>
+		<div class="row">
+			<button class="btn btn-accent" onclick={finishConnect} disabled={lfBusy}>
+				{lfBusy ? 'Finishing…' : 'I’ve authorized — finish'}
+			</button>
+			<button class="btn" onclick={() => (lfToken = null)} disabled={lfBusy}>Cancel</button>
+		</div>
+	{/if}
+
+	{#if lfError}<p class="err">{lfError}</p>{/if}
+
+	{#if scrobbles.length}
+		<ul class="scrobbles">
+			{#each scrobbles as s (s.id)}
+				<li>
+					<span class="s-state {s.state}" title={s.error ?? s.state}></span>
+					<span class="s-title">{s.title}</span>
+					<span class="s-artist muted">{s.artist}</span>
+				</li>
+			{/each}
+		</ul>
 	{/if}
 </section>
 
@@ -350,5 +654,44 @@
 	.u-pill.on {
 		color: var(--text);
 		border-color: var(--accent-dim);
+	}
+	.scrobbles {
+		list-style: none;
+		margin: 0.9rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	.scrobbles li {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		font-size: 0.85rem;
+	}
+	.s-state {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex: none;
+		background: var(--text-faint);
+	}
+	.s-state.sent {
+		background: var(--good);
+	}
+	.s-state.pending {
+		background: var(--warn, #d08770);
+	}
+	.s-state.failed {
+		background: var(--bad);
+	}
+	.s-title {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 55%;
+	}
+	.s-artist {
+		font-size: 0.8rem;
 	}
 </style>

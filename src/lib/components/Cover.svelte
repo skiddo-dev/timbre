@@ -5,7 +5,7 @@
 		albumId,
 		hasArt = true,
 		alt = '',
-		radius = 'var(--radius-sm)'
+		radius = '0'
 	}: { albumId: number | null; hasArt?: boolean; alt?: string; radius?: string } = $props();
 
 	let failed = $state(false);

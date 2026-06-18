@@ -76,7 +76,7 @@
 
 <header class="hero" style:--art={art}>
 	<div class="art">
-		<Cover albumId={data.album.id} hasArt={data.album.hasArt} alt={data.album.title} radius="var(--radius-lg)" />
+		<Cover albumId={data.album.id} hasArt={data.album.hasArt} alt={data.album.title} radius="0" />
 	</div>
 	<div class="info">
 		<span class="kind eyebrow">{releaseKind ? releaseKind.toUpperCase() : 'ALBUM'}</span>
@@ -108,6 +108,9 @@
 			<button class="btn" onclick={radio} disabled={radioLoading}>{radioLoading ? '…' : '📻 Radio'}</button>
 			<button class="btn" onclick={queueAlbum}>＋ Queue</button>
 			<button class="btn" onclick={enrich} disabled={enriching}>{enriching ? 'Fetching…' : data.album.mbid ? 'Refresh metadata' : 'Fetch metadata'}</button>
+			{#if data.album.appleUrl}
+				<a class="btn" href={data.album.appleUrl} target="_blank" rel="noopener noreferrer" title="Open in Apple Music">Apple Music ↗</a>
+			{/if}
 		</div>
 	</div>
 </header>
@@ -152,7 +155,7 @@
 		width: 230px;
 		flex: none;
 		box-shadow: var(--shadow), 0 12px 40px -12px rgb(var(--art) / 0.55);
-		border-radius: var(--radius-lg);
+		border-radius: 0;
 		overflow: hidden;
 		transition: box-shadow 0.6s ease;
 	}

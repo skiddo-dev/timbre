@@ -32,6 +32,11 @@ library, artwork, playback, analysis — stays on that machine.
 - **Apple Music / iTunes import** — bring your local Music library in: scan its media folder, then
   import the `Library.xml` (Settings) to pull **playlists, star ratings, and play counts**. Fully
   local, no account; Apple Music *subscription* downloads are DRM-locked and skipped.
+- **Last.fm scrobbling** — opt-in, and the only cloud connection in Timbre. Connect your profile from
+  **Settings** (a one-click desktop auth flow — no password touches Timbre), then plays are scrobbled
+  with "now playing" + a track.scrobble once you've heard half the track (or 4 min). Submissions are
+  logged in a local queue and **retried when Last.fm is reachable**, so nothing is lost offline.
+  Disabled until you set `LASTFM_API_KEY` / `LASTFM_API_SECRET`; stubbed under `TIMBRE_FAKE_LASTFM=1`.
 - **Usenet (NZB) acquisition** — the `/usenet` screen searches your Newznab indexers, grabs a release,
   and downloads it **straight into your library**. Two engines: a **SABnzbd / NZBGet** client (the
   recommended primary — it does PAR2 repair + unrar) and a **built-in NNTP + yEnc** downloader (a
@@ -63,6 +68,8 @@ Open **Settings**, point Timbre at your music folder, hit **Rescan**, then (opti
 | `MUSICBRAINZ_UA` | Required User-Agent for MusicBrainz |
 | `TIMBRE_FAKE_ENRICH` | `1` → offline canned enrichment (tests) |
 | `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_MODEL` | Wired but unused until the M7 discovery brain |
+| `LASTFM_API_KEY` / `LASTFM_API_SECRET` | Last.fm app credentials — enables scrobbling ([create one](https://www.last.fm/api/account/create)) |
+| `TIMBRE_FAKE_LASTFM` | `1` → stub Last.fm auth + scrobble submission (tests) |
 | `SABNZBD_URL` / `SABNZBD_API_KEY` | SABnzbd (or NZBGet) download client — the primary Usenet engine (PAR2 + unrar) |
 | `NNTP_HOST` / `NNTP_PORT` / `NNTP_SSL` / `NNTP_USER` / `NNTP_PASS` | Usenet provider for the built-in NNTP + yEnc fallback engine |
 
@@ -71,7 +78,7 @@ Open **Settings**, point Timbre at your music folder, hit **Rescan**, then (opti
 ```bash
 rm -f /tmp/timbre.db*
 DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
-  ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 \
+  ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 TIMBRE_FAKE_LASTFM=1 \
   NNTP_HOST=127.0.0.1 NNTP_PORT=1819 NNTP_SSL=0 NNTP_USER=u NNTP_PASS=p \
   SABNZBD_URL=http://127.0.0.1:1820 SABNZBD_API_KEY=mock \
   npm run dev -- --port 5181 --host 127.0.0.1 &
@@ -79,10 +86,10 @@ MUSIC_DIR=/tmp/timbre-verify-music npm run verify
 ```
 
 The harness writes tagged WAV fixtures, then asserts the full scan → stream(+Range) → search →
-album page → queue/player → enrich → loudness → **Usenet** pipeline over HTTP. The Usenet section
-spins up mock Newznab / NNTP / SABnzbd servers (the `NNTP_*` / `SABNZBD_*` env points the dev server
-at them) and grabs a release through **both** engines, asserting the yEnc round-trip is byte-exact
-(NNTP → kernel → disk).
+album page → queue/player → enrich → loudness → discovery → scrobble → **Usenet** pipeline over
+HTTP. The Usenet section spins up mock Newznab / NNTP / SABnzbd servers (the `NNTP_*` / `SABNZBD_*`
+env points the dev server at them) and grabs a release through **both** engines, asserting the
+yEnc round-trip is byte-exact (NNTP → kernel → disk).
 
 ## Multi-room setup (Snapcast)
 
@@ -131,6 +138,7 @@ installed. The yEnc decode runs on the same hand-authored WASM kernel as the lou
 
 ## Roadmap
 
+- ✅ **Last.fm scrobbling**: opt-in now-playing + scrobble with an offline retry queue.
 - ✅ **M7 — Local-AI discovery brain**: auto-tagging, Radio, natural-language Ask.
 - ✅ **M6 — Snapcast multi-room**: `/zones` control plane + queue casting via the FIFO feeder.
 - ✅ **Non-local sources**: internet radio (`/radio`) over the `streamUrl` seam — the model for

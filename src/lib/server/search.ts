@@ -11,7 +11,8 @@ const ARTIST_COLS = `id, name, sort_name, mbid, bio, (image_path IS NOT NULL) AS
 const ALBUM_COLS = `id, title, album_artist, year, mbid, source, (art_path IS NOT NULL) AS has_art, added_at`;
 const TRACK_COLS = `id, album_id, artist, title, track_no, disc_no, duration_ms, codec, sample_rate,
 	bit_depth, channels, bitrate, loudness_lufs, true_peak, gain_db,
-	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at,
+	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at, rating, source, source_url,
+	apple_id, apple_url,
 	(SELECT title FROM albums WHERE id = tracks.album_id) AS album_title`;
 
 export function rebuildSearchIndex(): void {

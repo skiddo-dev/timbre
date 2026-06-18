@@ -20,12 +20,15 @@ const jsonArr = (v: unknown): string[] => {
 	}
 };
 
-const ARTIST_COLS = `id, name, sort_name, mbid, bio, (image_path IS NOT NULL) AS has_image`;
+const ARTIST_COLS = `id, name, sort_name, mbid, bio, (image_path IS NOT NULL) AS has_image,
+	mb_type, country, begin_year, end_year, mb_genres`;
 const ALBUM_COLS = `id, title, album_artist, year, mbid, source, (art_path IS NOT NULL) AS has_art,
-	added_at, genre, mood, tags, descriptor`;
+	added_at, genre, mood, tags, descriptor, mb_primary_type, mb_secondary_types, first_released, mb_genres,
+	apple_id, apple_url`;
 const TRACK_COLS = `id, album_id, artist, title, track_no, disc_no, duration_ms, codec, sample_rate,
 	bit_depth, channels, bitrate, loudness_lufs, true_peak, gain_db,
-	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at, rating`;
+	(peaks_blob IS NOT NULL) AS has_peaks, play_count, last_played_at, rating, source, source_url,
+	apple_id, apple_url`;
 
 export function mapArtist(r: Row): Artist {
 	return {
@@ -34,7 +37,12 @@ export function mapArtist(r: Row): Artist {
 		sortName: str(r.sort_name),
 		mbid: strN(r.mbid),
 		bio: strN(r.bio),
-		hasImage: bool(r.has_image)
+		hasImage: bool(r.has_image),
+		mbType: strN(r.mb_type),
+		country: strN(r.country),
+		beginYear: numN(r.begin_year),
+		endYear: numN(r.end_year),
+		genres: jsonArr(r.mb_genres)
 	};
 }
 
@@ -53,7 +61,13 @@ export function mapAlbum(r: Row): Album {
 		genre: strN(r.genre),
 		mood: strN(r.mood),
 		tags: jsonArr(r.tags),
-		descriptor: strN(r.descriptor)
+		descriptor: strN(r.descriptor),
+		mbPrimaryType: strN(r.mb_primary_type),
+		mbSecondaryTypes: jsonArr(r.mb_secondary_types),
+		firstReleased: strN(r.first_released),
+		mbGenres: jsonArr(r.mb_genres),
+		appleId: strN(r.apple_id),
+		appleUrl: strN(r.apple_url)
 	};
 }
 
@@ -78,7 +92,11 @@ export function mapTrack(r: Row): Track {
 		hasPeaks: bool(r.has_peaks),
 		playCount: num(r.play_count),
 		lastPlayedAt: strN(r.last_played_at),
-		rating: numN(r.rating)
+		rating: numN(r.rating),
+		source: str(r.source) || 'local',
+		sourceUrl: strN(r.source_url),
+		appleId: strN(r.apple_id),
+		appleUrl: strN(r.apple_url)
 	};
 }
 
@@ -87,6 +105,7 @@ const ALBUM_STATS = `LEFT JOIN tracks t ON t.album_id = a.id`;
 const ALBUM_SELECT_STATS = `
 	SELECT a.id, a.title, a.album_artist, a.year, a.mbid, a.source,
 		(a.art_path IS NOT NULL) AS has_art, a.added_at, a.genre, a.mood, a.tags, a.descriptor,
+		a.mb_primary_type, a.mb_secondary_types, a.first_released, a.mb_genres, a.apple_id, a.apple_url,
 		COUNT(t.id) AS track_count, COALESCE(SUM(t.duration_ms), 0) AS duration_ms
 	FROM albums a ${ALBUM_STATS}`;
 
@@ -200,6 +219,37 @@ export function markPlayed(id: number): void {
 	).run(new Date().toISOString(), id);
 }
 
+export interface ScrobbleTrack {
+	trackId: number;
+	artist: string;
+	title: string;
+	album: string | null;
+	albumArtist: string | null;
+	durationSec: number | null;
+}
+
+/** Metadata snapshot a track needs to be scrobbled to Last.fm, or null if unknown. */
+export function trackForScrobble(id: number): ScrobbleTrack | null {
+	const r = db
+		.prepare(
+			`SELECT t.id, t.artist, t.title, t.duration_ms,
+			        a.title AS album, a.album_artist AS album_artist
+			 FROM tracks t JOIN albums a ON a.id = t.album_id
+			 WHERE t.id = ?`
+		)
+		.get(id) as Row | undefined;
+	if (!r) return null;
+	const durMs = num(r.duration_ms);
+	return {
+		trackId: num(r.id),
+		artist: str(r.artist),
+		title: str(r.title),
+		album: strN(r.album),
+		albumArtist: strN(r.album_artist),
+		durationSec: durMs > 0 ? Math.round(durMs / 1000) : null
+	};
+}
+
 export interface LibraryStats {
 	artists: number;
 	albums: number;
@@ -221,6 +271,7 @@ export function libraryStats(): LibraryStats {
 const TRACK_COLS_T = `t.id, t.album_id, t.artist, t.title, t.track_no, t.disc_no, t.duration_ms,
 	t.codec, t.sample_rate, t.bit_depth, t.channels, t.bitrate, t.loudness_lufs, t.true_peak,
 	t.gain_db, (t.peaks_blob IS NOT NULL) AS has_peaks, t.play_count, t.last_played_at, t.rating,
+	t.source, t.source_url, t.apple_id, t.apple_url,
 	(SELECT title FROM albums WHERE id = t.album_id) AS album_title`;
 
 /** Fetch tracks by id, preserving the order of `ids` (only real tracks returned). */

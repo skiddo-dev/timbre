@@ -58,30 +58,87 @@ async function download(url: string, base: string): Promise<string | null> {
 	}
 }
 
+// ── MusicBrainz parsing helpers ───────────────────────────────────────────────
+const strOrNull = (v: unknown): string | null => {
+	const s = typeof v === 'string' ? v.trim() : '';
+	return s.length ? s : null;
+};
+
+// Leading 4-digit year out of an MB date ('1973', '1973-03', '1973-03-01').
+function yearOf(date: unknown): number | null {
+	const m = /^(\d{4})/.exec(typeof date === 'string' ? date : '');
+	return m ? Number(m[1]) : null;
+}
+
+// MB exposes both curated `genres` and folksonomy `tags` ([{name, count}]).
+// Prefer genres, fall back to tags; return the most-tagged names, deduped.
+function topGenres(obj: any, max = 6): string[] {
+	const src: any[] = Array.isArray(obj?.genres) && obj.genres.length ? obj.genres : obj?.tags ?? [];
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const t of [...src].sort((a, b) => (Number(b?.count) || 0) - (Number(a?.count) || 0))) {
+		const name = typeof t?.name === 'string' ? t.name.trim().toLowerCase() : '';
+		if (name && !seen.has(name)) {
+			seen.add(name);
+			out.push(name);
+			if (out.length >= max) break;
+		}
+	}
+	return out;
+}
+
+const jsonOrNull = (a: string[]): string | null => (a.length ? JSON.stringify(a) : null);
+
 export interface ArtistEnrichment {
 	mbid: string | null;
 	bio: string | null;
 	image: boolean;
+	type: string | null;
+	country: string | null;
+	beginYear: number | null;
+	endYear: number | null;
+	genres: string[];
 }
 
 export async function enrichArtist(id: number): Promise<ArtistEnrichment> {
 	const row = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as
 		| { id: number; name: string }
 		| undefined;
-	if (!row) return { mbid: null, bio: null, image: false };
+	if (!row) return { mbid: null, bio: null, image: false, type: null, country: null, beginYear: null, endYear: null, genres: [] };
 
 	if (fake()) {
 		const bio = `${row.name} is an artist in your library. (Offline enrichment fixture.)`;
-		db.prepare('UPDATE artists SET mbid = ?, bio = ? WHERE id = ?').run('fake-artist-mbid', bio, id);
-		return { mbid: 'fake-artist-mbid', bio, image: false };
+		const genres = ['rock', 'indie'];
+		db.prepare(
+			`UPDATE artists SET mbid = ?, bio = ?, mb_type = ?, country = ?, begin_year = ?, end_year = ?, mb_genres = ? WHERE id = ?`
+		).run('fake-artist-mbid', bio, 'Group', 'US', 1970, null, JSON.stringify(genres), id);
+		return { mbid: 'fake-artist-mbid', bio, image: false, type: 'Group', country: 'US', beginYear: 1970, endYear: null, genres };
 	}
 
-	let mbid: string | null = null;
 	await mbThrottle();
 	const mb = await getJson(
 		`https://musicbrainz.org/ws/2/artist/?query=artist:${encodeURIComponent(row.name)}&fmt=json&limit=1`
 	);
-	mbid = mb?.artists?.[0]?.id ?? null;
+	const hit = mb?.artists?.[0] ?? null;
+	const mbid: string | null = hit?.id ?? null;
+
+	// A direct lookup carries genres/tags + the structured facts MB is authoritative
+	// for; fall back to the search hit if the lookup is unavailable.
+	let type: string | null = null;
+	let country: string | null = null;
+	let beginYear: number | null = null;
+	let endYear: number | null = null;
+	let genres: string[] = [];
+	if (mbid) {
+		await mbThrottle();
+		const detail = await getJson(`https://musicbrainz.org/ws/2/artist/${mbid}?inc=genres+tags&fmt=json`);
+		const src = detail ?? hit;
+		type = strOrNull(src?.type);
+		country = strOrNull(src?.country);
+		beginYear = yearOf(src?.['life-span']?.begin);
+		endYear = yearOf(src?.['life-span']?.end);
+		genres = topGenres(detail ?? hit);
+	}
 
 	// Wikipedia summary → bio + image (best-effort, name-based)
 	let bio: string | null = null;
@@ -97,25 +154,39 @@ export async function enrichArtist(id: number): Promise<ArtistEnrichment> {
 
 	db.prepare(
 		`UPDATE artists SET mbid = COALESCE(?, mbid), bio = COALESCE(?, bio),
-		 image_path = COALESCE(?, image_path) WHERE id = ?`
-	).run(mbid, bio, imagePath, id);
-	return { mbid, bio, image: !!imagePath };
+		 image_path = COALESCE(?, image_path), mb_type = COALESCE(?, mb_type),
+		 country = COALESCE(?, country), begin_year = COALESCE(?, begin_year),
+		 end_year = COALESCE(?, end_year), mb_genres = COALESCE(?, mb_genres) WHERE id = ?`
+	).run(mbid, bio, imagePath, type, country, beginYear, endYear, jsonOrNull(genres), id);
+	return { mbid, bio, image: !!imagePath, type, country, beginYear, endYear, genres };
 }
 
 export interface AlbumEnrichment {
 	mbid: string | null;
 	art: boolean;
+	year: number | null;
+	primaryType: string | null;
+	secondaryTypes: string[];
+	firstReleased: string | null;
+	genres: string[];
 }
 
 export async function enrichAlbum(id: number): Promise<AlbumEnrichment> {
-	const row = db.prepare('SELECT id, title, album_artist, art_path FROM albums WHERE id = ?').get(id) as
-		| { id: number; title: string; album_artist: string; art_path: string | null }
+	const row = db.prepare('SELECT id, title, album_artist, year, art_path FROM albums WHERE id = ?').get(id) as
+		| { id: number; title: string; album_artist: string; year: number | null; art_path: string | null }
 		| undefined;
-	if (!row) return { mbid: null, art: false };
+	if (!row) return { mbid: null, art: false, year: null, primaryType: null, secondaryTypes: [], firstReleased: null, genres: [] };
 
 	if (fake()) {
-		db.prepare('UPDATE albums SET mbid = ? WHERE id = ?').run('fake-album-mbid', id);
-		return { mbid: 'fake-album-mbid', art: !!row.art_path };
+		const genres = ['rock'];
+		db.prepare(
+			`UPDATE albums SET mbid = ?, mb_primary_type = ?, first_released = ?, mb_genres = ?,
+			 year = COALESCE(year, ?) WHERE id = ?`
+		).run('fake-album-mbid', 'Album', '1971-01-01', JSON.stringify(genres), 1971, id);
+		return {
+			mbid: 'fake-album-mbid', art: !!row.art_path, year: row.year ?? 1971,
+			primaryType: 'Album', secondaryTypes: [], firstReleased: '1971-01-01', genres
+		};
 	}
 
 	await mbThrottle();
@@ -124,7 +195,26 @@ export async function enrichAlbum(id: number): Promise<AlbumEnrichment> {
 			row.title
 		)} AND artist:${encodeURIComponent(row.album_artist)}&fmt=json&limit=1`
 	);
-	const mbid: string | null = mb?.['release-groups']?.[0]?.id ?? null;
+	const hit = mb?.['release-groups']?.[0] ?? null;
+	const mbid: string | null = hit?.id ?? null;
+
+	let primaryType: string | null = null;
+	let secondaryTypes: string[] = [];
+	let firstReleased: string | null = null;
+	let genres: string[] = [];
+	if (mbid) {
+		await mbThrottle();
+		const detail = await getJson(`https://musicbrainz.org/ws/2/release-group/${mbid}?inc=genres+tags&fmt=json`);
+		const src = detail ?? hit;
+		primaryType = strOrNull(src?.['primary-type']);
+		secondaryTypes = Array.isArray(src?.['secondary-types'])
+			? src['secondary-types'].map((t: unknown) => String(t)).filter(Boolean)
+			: [];
+		firstReleased = strOrNull(src?.['first-release-date']);
+		genres = topGenres(detail ?? hit);
+	}
+	// Only fill year when the file tags didn't already provide one.
+	const year = row.year ?? yearOf(firstReleased);
 
 	// Fetch a front cover only if we don't already have embedded art.
 	let artPath = row.art_path;
@@ -133,7 +223,12 @@ export async function enrichAlbum(id: number): Promise<AlbumEnrichment> {
 	}
 
 	db.prepare(
-		`UPDATE albums SET mbid = COALESCE(?, mbid), art_path = COALESCE(?, art_path) WHERE id = ?`
-	).run(mbid, artPath, id);
-	return { mbid, art: !!artPath };
+		`UPDATE albums SET mbid = COALESCE(?, mbid), art_path = COALESCE(?, art_path),
+		 year = COALESCE(year, ?), mb_primary_type = COALESCE(?, mb_primary_type),
+		 mb_secondary_types = COALESCE(?, mb_secondary_types),
+		 first_released = COALESCE(?, first_released), mb_genres = COALESCE(?, mb_genres) WHERE id = ?`
+	).run(
+		mbid, artPath, year, primaryType, jsonOrNull(secondaryTypes), firstReleased, jsonOrNull(genres), id
+	);
+	return { mbid, art: !!artPath, year, primaryType, secondaryTypes, firstReleased, genres };
 }

@@ -126,7 +126,7 @@
 	.rc-art {
 		width: 50px;
 		flex: none;
-		border-radius: 7px;
+		border-radius: 0;
 		overflow: hidden;
 		box-shadow: var(--shadow-sm);
 	}

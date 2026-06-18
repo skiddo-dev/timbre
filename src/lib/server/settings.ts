@@ -17,6 +17,10 @@ export function setSetting(key: string, value: string): void {
 	).run(key, value);
 }
 
+export function deleteSetting(key: string): void {
+	db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+}
+
 /** Music folder: DB override wins, else MUSIC_DIR from env. */
 export function getMusicDir(): string {
 	return (getSetting('music_dir') || env.MUSIC_DIR || '').trim();

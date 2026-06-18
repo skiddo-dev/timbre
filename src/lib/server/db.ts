@@ -145,6 +145,70 @@ const MIGRATIONS: Migration[] = [
 		`
 	},
 	{
+		id: '005_blog_source',
+		sql: `
+		ALTER TABLE tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'local'; -- 'local' | 'blog' | …
+		ALTER TABLE tracks ADD COLUMN source_url TEXT;                      -- link back to a non-local source (e.g. a music-blog post)
+		`
+	},
+	{
+		// Factual metadata sourced from MusicBrainz during enrichment. The MBID
+		// (artists.mbid / albums.mbid) already existed; these hold the fields MB is
+		// authoritative for, kept separate from the AI-guessed album genre/mood/tags.
+		id: '006_musicbrainz_meta',
+		sql: `
+		ALTER TABLE artists ADD COLUMN mb_type TEXT;       -- 'Person' | 'Group' | …
+		ALTER TABLE artists ADD COLUMN country TEXT;       -- ISO 3166 code, e.g. 'US'
+		ALTER TABLE artists ADD COLUMN begin_year INTEGER; -- life-span begin
+		ALTER TABLE artists ADD COLUMN end_year INTEGER;   -- life-span end (null = still active)
+		ALTER TABLE artists ADD COLUMN mb_genres TEXT;     -- JSON array, ordered by MB tag count
+
+		ALTER TABLE albums ADD COLUMN mb_primary_type TEXT;     -- 'Album' | 'EP' | 'Single' | …
+		ALTER TABLE albums ADD COLUMN mb_secondary_types TEXT;  -- JSON array, e.g. ['Live','Compilation']
+		ALTER TABLE albums ADD COLUMN first_released TEXT;       -- MB first-release-date (YYYY[-MM[-DD]])
+		ALTER TABLE albums ADD COLUMN mb_genres TEXT;            -- JSON array, ordered by MB tag count
+		`
+	},
+	{
+		// Last.fm scrobble log + offline queue. Each row is a metadata snapshot
+		// (so a scrobble survives the track being deleted) plus the played_at
+		// timestamp Last.fm wants. state walks 'pending' → 'sent' | 'failed';
+		// pending rows are retried whenever we reconnect or scrobble again, which
+		// is how scrobbling stays correct while the network or Last.fm is down.
+		id: '007_scrobbles',
+		sql: `
+		CREATE TABLE scrobbles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+			artist TEXT NOT NULL,
+			title TEXT NOT NULL,
+			album TEXT,
+			album_artist TEXT,
+			duration_sec INTEGER,
+			played_at INTEGER NOT NULL,            -- unix seconds (the timestamp Last.fm wants)
+			state TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'sent' | 'failed'
+			error TEXT,
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX idx_scrobbles_state ON scrobbles(state, played_at);
+		CREATE INDEX idx_scrobbles_recent ON scrobbles(played_at DESC);
+		`
+	},
+	{
+		// Apple Music *subscription* link (catalog enrichment + library sync). The
+		// subscription is a metadata/library source, never a player — Apple's catalog
+		// data fills these IDs and `apple_url` deep-links back out to Apple Music.
+		// Library tracks with no local file become `source='applemusic'` wishlist rows
+		// (non-playable, like the blog crate) so the player pipeline never sees DRM.
+		id: '008_applemusic',
+		sql: `
+		ALTER TABLE albums ADD COLUMN apple_id TEXT;   -- Apple Music catalog album id
+		ALTER TABLE albums ADD COLUMN apple_url TEXT;  -- music.apple.com deep link
+		ALTER TABLE tracks ADD COLUMN apple_id TEXT;   -- Apple Music catalog song id
+		ALTER TABLE tracks ADD COLUMN apple_url TEXT;  -- music.apple.com deep link
+		`
+	},
+	{
 		// Usenet (NZB) acquisition. `usenet_indexers` are the Newznab-compatible
 		// search sources (added from Settings, like radio stations). `usenet_downloads`
 		// is the grab queue/history: a release is searched → grabbed → fetched by the
