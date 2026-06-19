@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getCastStatus, startCast, stopCast, skipCast } from '$lib/server/streamer';
+import { getCastStatus, stopCast, skipCast } from '$lib/server/streamer';
+import { castLocalTrackIds } from '$lib/server/transport';
 
 export const GET: RequestHandler = () => json(getCastStatus());
 
@@ -12,7 +13,9 @@ export const POST: RequestHandler = async ({ request }) => {
 	};
 	switch (b.action) {
 		case 'start':
-			return json(startCast((b.trackIds ?? []).map(Number), Number(b.startIndex) || 0));
+			// /zones quick-cast: cast local library tracks (non-local ids are skipped).
+			castLocalTrackIds((b.trackIds ?? []).map(Number), Number(b.startIndex) || 0);
+			return json(getCastStatus());
 		case 'stop':
 			return json(stopCast());
 		case 'next':

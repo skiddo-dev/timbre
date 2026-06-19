@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import type { ScanStatus, LastfmStatus, Scrobble, AppleMusicStatus, AppleSyncResult } from '$lib/types';
+	import type { ScanStatus, LastfmStatus, Scrobble, AppleMusicStatus, AppleSyncResult, SubsonicStatus } from '$lib/types';
 	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -257,6 +257,70 @@
 		}
 	}
 
+	// ── Subsonic / OpenSubsonic streaming server ──────────────────────────────
+	// svelte-ignore state_referenced_locally
+	let sub = $state<SubsonicStatus>(data.subsonic);
+	// svelte-ignore state_referenced_locally
+	let subUrl = $state(data.subsonic.url);
+	// svelte-ignore state_referenced_locally
+	let subUser = $state(data.subsonic.user);
+	let subPass = $state('');
+	let subBusy = $state(false);
+	let subError = $state<string | null>(null);
+
+	async function subPost(action: string, extra: Record<string, unknown> = {}) {
+		const res = await fetch('/api/subsonic', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action, ...extra })
+		});
+		if (!res.ok) {
+			const p = await res.json().catch(() => ({}));
+			throw new Error(p.message || 'Subsonic request failed.');
+		}
+		return res.json();
+	}
+
+	async function connectSubsonic() {
+		subBusy = true;
+		subError = null;
+		try {
+			sub = await subPost('configure', { url: subUrl, user: subUser, pass: subPass });
+			subPass = '';
+			if (sub.reachable === false) subError = sub.error || 'Could not reach the server.';
+		} catch (e) {
+			subError = (e as Error).message;
+		} finally {
+			subBusy = false;
+		}
+	}
+
+	async function testSubsonic() {
+		subBusy = true;
+		subError = null;
+		try {
+			sub = await subPost('test');
+			if (sub.reachable === false) subError = sub.error || 'Server unreachable.';
+		} catch (e) {
+			subError = (e as Error).message;
+		} finally {
+			subBusy = false;
+		}
+	}
+
+	async function disconnectSubsonic() {
+		subBusy = true;
+		subError = null;
+		try {
+			sub = await subPost('disconnect');
+			subUrl = subUser = subPass = '';
+		} catch (e) {
+			subError = (e as Error).message;
+		} finally {
+			subBusy = false;
+		}
+	}
+
 	async function save() {
 		saving = true;
 		saved = false;
@@ -422,6 +486,41 @@
 			</p>
 		{/if}
 	{/if}
+</section>
+
+<section class="card">
+	<h2>Streaming server (Subsonic)</h2>
+	<p class="muted small" style="margin-top:0">
+		Connect a self-hosted <strong>Subsonic / OpenSubsonic</strong> server (Navidrome, Airsonic,
+		Gonic…) and stream it through Timbre's transport from the
+		<a href="/subsonic">Streaming</a> page. Real audio in — no DRM, no cloud subscription. Your
+		password is salted-hashed on every request and never leaves the server.
+	</p>
+
+	<div class="sub-fields">
+		<input type="text" bind:value={subUrl} placeholder="https://music.example.com" spellcheck="false" />
+		<input type="text" bind:value={subUser} placeholder="username" spellcheck="false" autocomplete="off" />
+		<input
+			type="password"
+			bind:value={subPass}
+			placeholder={sub.hasPassword ? '•••••••• (saved)' : 'password'}
+			autocomplete="off"
+		/>
+	</div>
+
+	<div class="row" style="margin-top:0.7rem">
+		<button class="btn btn-accent" onclick={connectSubsonic} disabled={subBusy || !subUrl || !subUser}>
+			{subBusy ? 'Connecting…' : sub.configured ? 'Save & reconnect' : 'Connect'}
+		</button>
+		{#if sub.configured}
+			<button class="btn" onclick={testSubsonic} disabled={subBusy}>Test</button>
+			<button class="btn btn-ghost" onclick={disconnectSubsonic} disabled={subBusy}>Disconnect</button>
+		{/if}
+		{#if sub.configured && sub.reachable !== false && !subError}
+			<span class="ok small"><Icon name="check" size={14} /> {sub.fake ? 'Demo (fake) mode' : sub.reachable ? 'Connected' : 'Saved'}</span>
+		{/if}
+	</div>
+	{#if subError}<p class="err small">{subError}</p>{/if}
 </section>
 
 <section class="card">
@@ -599,6 +698,19 @@
 		display: flex;
 		align-items: center;
 		gap: 0.6rem;
+	}
+	.sub-fields {
+		display: grid;
+		grid-template-columns: 2fr 1fr 1fr;
+		gap: 0.5rem;
+	}
+	.sub-fields input {
+		width: 100%;
+	}
+	@media (max-width: 680px) {
+		.sub-fields {
+			grid-template-columns: 1fr;
+		}
 	}
 	.ok {
 		display: inline-flex;

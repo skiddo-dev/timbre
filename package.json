@@ -16,7 +16,8 @@
     "gen:wasm": "node scripts/gen-wasm-kernels.mjs",
     "verify": "node scripts/verify.mjs",
     "mock:snap": "node scripts/mock-snapserver.mjs",
-    "mock:usenet": "node scripts/mock-usenet.mjs"
+    "mock:usenet": "node scripts/mock-usenet.mjs",
+    "mock:subsonic": "node scripts/mock-subsonic.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.9",

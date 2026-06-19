@@ -246,6 +246,17 @@ const MIGRATIONS: Migration[] = [
 		);
 		CREATE INDEX idx_usenet_downloads_created ON usenet_downloads(created_at DESC);
 		`
+	},
+	{
+		// Unified transport: the active output target for the one shared queue.
+		// 'browser' (Web Audio on this device, the default), 'snapcast' (a zone),
+		// or 'airplay' (a device); output_id holds the snapcast group / airplay
+		// device id. See src/lib/server/transport.ts.
+		id: '010_transport',
+		sql: `
+		ALTER TABLE player_state ADD COLUMN output TEXT NOT NULL DEFAULT 'browser';
+		ALTER TABLE player_state ADD COLUMN output_id TEXT;
+		`
 	}
 ];
 

@@ -6,6 +6,8 @@ import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 import { getTrackPath } from '$lib/server/repo';
+import { getDspProfile, activeIrPath } from '$lib/server/dsp';
+import { ffmpegDspArgs } from '$lib/dsp';
 
 const MIME: Record<string, string> = {
 	'.flac': 'audio/flac',
@@ -58,9 +60,14 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 	// Transcode path: pipe through ffmpeg → MP3. No Range (it's a live re-encode),
 	// so the browser buffers forward. Falls through to a raw serve if ffmpeg is absent.
 	if (wantTranscode && (await hasFfmpeg())) {
-		const proc = spawn(FFMPEG(), ['-v', 'quiet', '-i', path, '-f', 'mp3', '-b:a', '256k', '-'], {
-			stdio: ['ignore', 'pipe', 'ignore']
-		});
+		// Apply the shared DSP profile (EQ + optional room-correction IR) so transcoded
+		// playback — including AirPlay, which streams via this path — honours it too.
+		const { extraInputs, filterArgs } = ffmpegDspArgs(getDspProfile(), activeIrPath());
+		const proc = spawn(
+			FFMPEG(),
+			['-v', 'quiet', '-i', path, ...extraInputs, ...filterArgs, '-f', 'mp3', '-b:a', '256k', '-'],
+			{ stdio: ['ignore', 'pipe', 'ignore'] }
+		);
 		request.signal?.addEventListener('abort', () => {
 			try {
 				proc.kill('SIGKILL');

@@ -45,12 +45,15 @@ export function setQueue(trackIds: number[]): void {
 
 export function getPlayerState(): PlayerState {
 	const r = db.prepare('SELECT * FROM player_state WHERE id = 1').get() as Row;
+	const output = String(r?.output ?? 'browser');
 	return {
 		currentTrackId: r?.current_track_id == null ? null : Number(r.current_track_id),
 		positionMs: Number(r?.position_ms ?? 0),
 		volume: Number(r?.volume ?? 1),
 		shuffle: !!Number(r?.shuffle ?? 0),
-		repeat: (String(r?.repeat ?? 'off') as PlayerState['repeat']) || 'off'
+		repeat: (String(r?.repeat ?? 'off') as PlayerState['repeat']) || 'off',
+		output: (['browser', 'snapcast', 'airplay'].includes(output) ? output : 'browser') as PlayerState['output'],
+		outputId: r?.output_id == null ? null : String(r.output_id)
 	};
 }
 
@@ -58,15 +61,18 @@ export function setPlayerState(p: Partial<PlayerState>): void {
 	const cur = getPlayerState();
 	const next = { ...cur, ...p };
 	const repeat = ['off', 'all', 'one'].includes(next.repeat) ? next.repeat : 'off';
+	const output = ['browser', 'snapcast', 'airplay'].includes(next.output) ? next.output : 'browser';
 	db.prepare(
 		`UPDATE player_state
-		 SET current_track_id = ?, position_ms = ?, volume = ?, shuffle = ?, repeat = ?
+		 SET current_track_id = ?, position_ms = ?, volume = ?, shuffle = ?, repeat = ?, output = ?, output_id = ?
 		 WHERE id = 1`
 	).run(
 		next.currentTrackId,
 		Math.max(0, Math.round(next.positionMs)),
 		Math.min(1, Math.max(0, next.volume)),
 		next.shuffle ? 1 : 0,
-		repeat
+		repeat,
+		output,
+		next.outputId ?? null
 	);
 }
