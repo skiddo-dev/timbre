@@ -3,6 +3,7 @@
 	import type { PageData } from './$types';
 	import Cover from '$lib/components/Cover.svelte';
 	import TrackRow from '$lib/components/TrackRow.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import { player } from '$lib/audio/player.svelte';
 	import { formatDuration, qualityLabel } from '$lib/format';
 	import { ambientColor } from '$lib/ambient';
@@ -103,13 +104,13 @@
 			<p class="descriptor muted">{data.album.descriptor}</p>
 		{/if}
 		<div class="actions">
-			<button class="btn btn-accent" onclick={playAlbum}>▶ Play</button>
-			<button class="btn" onclick={shuffleAlbum}>⤮ Shuffle</button>
-			<button class="btn" onclick={radio} disabled={radioLoading}>{radioLoading ? '…' : '📻 Radio'}</button>
-			<button class="btn" onclick={queueAlbum}>＋ Queue</button>
+			<button class="btn btn-accent" onclick={playAlbum}><Icon name="play" size={15} /> Play</button>
+			<button class="btn" onclick={shuffleAlbum}><Icon name="shuffle" size={15} /> Shuffle</button>
+			<button class="btn" onclick={radio} disabled={radioLoading}>{#if radioLoading}…{:else}<Icon name="radio" size={15} /> Radio{/if}</button>
+			<button class="btn" onclick={queueAlbum}><Icon name="plus" size={15} /> Queue</button>
 			<button class="btn" onclick={enrich} disabled={enriching}>{enriching ? 'Fetching…' : data.album.mbid ? 'Refresh metadata' : 'Fetch metadata'}</button>
 			{#if data.album.appleUrl}
-				<a class="btn" href={data.album.appleUrl} target="_blank" rel="noopener noreferrer" title="Open in Apple Music">Apple Music ↗</a>
+				<a class="btn" href={data.album.appleUrl} target="_blank" rel="noopener noreferrer" title="Open in Apple Music">Apple Music <Icon name="external" size={14} /></a>
 			{/if}
 		</div>
 	</div>

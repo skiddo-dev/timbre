@@ -3,6 +3,7 @@
 	import type { PageData } from './$types';
 	import type { ZoneStatus } from '$lib/types';
 	import { player } from '$lib/audio/player.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 
 	interface CastStatus {
 		ready: boolean;
@@ -136,12 +137,12 @@
 		{#if cast.casting}
 			<span class="dot" aria-hidden="true"></span>
 			<span class="cast-label">Casting to your rooms · track {cast.index + 1} of {cast.queueLength}</span>
-			<button class="btn btn-ghost" onclick={() => castAct({ action: 'prev' })} title="Previous">⏮</button>
-			<button class="btn btn-ghost" onclick={() => castAct({ action: 'next' })} title="Next">⏭</button>
+			<button class="btn btn-ghost" onclick={() => castAct({ action: 'prev' })} title="Previous" aria-label="Previous"><Icon name="prev" size={15} /></button>
+			<button class="btn btn-ghost" onclick={() => castAct({ action: 'next' })} title="Next" aria-label="Next"><Icon name="next" size={15} /></button>
 			<button class="btn" onclick={() => castAct({ action: 'stop' })}>Stop casting</button>
 		{:else}
 			<span class="cast-label">Push the current play queue ({player.queue.length}) to your rooms via Snapcast.</span>
-			<button class="btn btn-accent" onclick={castQueue} disabled={player.queue.length === 0}>▶ Cast queue</button>
+			<button class="btn btn-accent" onclick={castQueue} disabled={player.queue.length === 0}><Icon name="play" size={15} /> Cast queue</button>
 		{/if}
 		{#if cast.error}<span class="err small">· {cast.error}</span>{/if}
 	</section>
@@ -206,8 +207,8 @@ SNAPCAST_FIFO=/tmp/snapfifo`}</pre>
 								<span class="c-host faint mono">{c.host}{c.connected ? '' : ' · offline'}</span>
 							</div>
 							<div class="c-row">
-								<button class="ico" onclick={() => act({ action: 'clientVolume', clientId: c.id, percent: c.volume, muted: !c.muted })} title="Mute">
-									{c.muted ? '🔇' : '🔈'}
+								<button class="ico" onclick={() => act({ action: 'clientVolume', clientId: c.id, percent: c.volume, muted: !c.muted })} title="Mute" aria-label={c.muted ? 'Unmute' : 'Mute'}>
+									<Icon name={c.muted ? 'mute' : 'volume'} size={16} />
 								</button>
 								<input
 									type="range"
@@ -249,7 +250,7 @@ SNAPCAST_FIFO=/tmp/snapfifo`}</pre>
 				{#each air.devices as d (d.id)}
 					<li>
 						<span>{d.name} <span class="faint mono small">{d.address}</span></span>
-						<button class="btn btn-ghost" onclick={() => castAir(d.id)} disabled={!player.current}>Cast current →</button>
+						<button class="btn btn-ghost" onclick={() => castAir(d.id)} disabled={!player.current}>Cast current <Icon name="arrow-right" size={14} /></button>
 					</li>
 				{/each}
 			</ul>

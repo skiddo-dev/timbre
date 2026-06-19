@@ -2,6 +2,7 @@
 	import type { PageData } from './$types';
 	import AlbumGrid from '$lib/components/AlbumGrid.svelte';
 	import Cover from '$lib/components/Cover.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import { player } from '$lib/audio/player.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -12,13 +13,13 @@
 
 {#if empty}
 	<div class="empty">
-		<div class="logo">◉</div>
+		<div class="logo"><Icon name="logo" size={56} /></div>
 		<h1>Welcome to Timbre</h1>
 		<p class="muted">
 			A no-subscription, self-hosted music player. Point it at your music folder and Timbre will
 			build a library — artwork, metadata and all — right here on this machine.
 		</p>
-		<a class="btn btn-accent" href="/settings">Choose your music folder →</a>
+		<a class="btn btn-accent" href="/settings">Choose your music folder <Icon name="arrow-right" size={15} /></a>
 	</div>
 {:else}
 	<header class="page-head">
@@ -49,7 +50,7 @@
 	<section>
 		<div class="sec-head">
 			<h2>Recently added</h2>
-			<a class="muted small" href="/albums">All albums →</a>
+			<a class="muted small link-arrow" href="/albums">All albums <Icon name="arrow-right" size={13} /></a>
 		</div>
 		<AlbumGrid albums={data.albums} />
 	</section>
@@ -62,8 +63,9 @@
 		text-align: center;
 	}
 	.logo {
-		font-size: 3rem;
+		display: inline-flex;
 		color: var(--accent);
+		filter: drop-shadow(0 0 16px rgba(224, 164, 92, 0.5));
 	}
 	.empty h1 {
 		font-size: 2rem;

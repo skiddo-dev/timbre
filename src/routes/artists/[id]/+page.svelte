@@ -3,6 +3,7 @@
 	import type { PageData } from './$types';
 	import AlbumGrid from '$lib/components/AlbumGrid.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import { player } from '$lib/audio/player.svelte';
 	import { ambientColor } from '$lib/ambient';
 
@@ -88,7 +89,7 @@
 		{/if}
 		<div class="actions">
 			<button class="btn btn-accent" onclick={radio} disabled={radioLoading}>
-				{radioLoading ? '…' : '📻 Artist radio'}
+				{#if radioLoading}…{:else}<Icon name="radio" size={15} /> Artist radio{/if}
 			</button>
 			<button class="btn" onclick={enrich} disabled={enriching}>
 				{enriching ? 'Fetching…' : data.artist.bio || data.artist.mbid ? 'Refresh metadata' : 'Fetch metadata'}

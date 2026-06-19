@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: PageData } = $props();
 </script>
@@ -21,7 +22,7 @@
 		{/each}
 	</div>
 {:else}
-	<p class="muted">No artists yet. <a href="/settings">Scan your library →</a></p>
+	<p class="muted">No artists yet. <a class="link-arrow" href="/settings">Scan your library <Icon name="arrow-right" size={13} /></a></p>
 {/if}
 
 <style>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import AlbumGrid from '$lib/components/AlbumGrid.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: PageData } = $props();
 	const sorts = [
@@ -30,7 +31,7 @@
 {#if data.albums.length}
 	<AlbumGrid albums={data.albums} />
 {:else}
-	<p class="muted">No albums yet. <a href="/settings">Scan your library →</a></p>
+	<p class="muted">No albums yet. <a class="link-arrow" href="/settings">Scan your library <Icon name="arrow-right" size={13} /></a></p>
 {/if}
 
 <style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import Icon from '$lib/components/Icon.svelte';
 	let { data }: { data: PageData } = $props();
 </script>
 
@@ -14,7 +15,7 @@
 		{#each data.playlists as p (p.id)}
 			<li>
 				<a href={`/playlists/${p.id}`}>
-					<span class="icon" aria-hidden="true">≣</span>
+					<span class="icon" aria-hidden="true"><Icon name="playlists" size={18} /></span>
 					<span class="name">{p.name}</span>
 					<span class="meta mono muted">{p.trackCount} tracks</span>
 				</a>

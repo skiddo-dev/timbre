@@ -6,6 +6,7 @@
 	import AlbumGrid from '$lib/components/AlbumGrid.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TrackRow from '$lib/components/TrackRow.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import { player } from '$lib/audio/player.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -54,11 +55,11 @@
 
 <div class="modes">
 	<button class="mode" class:active={mode === 'search'} onclick={() => (mode = 'search')}>Search</button>
-	<button class="mode" class:active={mode === 'ask'} onclick={() => (mode = 'ask')}>✦ Ask AI</button>
+	<button class="mode" class:active={mode === 'ask'} onclick={() => (mode = 'ask')}><Icon name="spark" size={15} /> Ask AI</button>
 </div>
 
 <div class="searchbar">
-	<span class="ico">{mode === 'ask' ? '✦' : '⌕'}</span>
+	<span class="ico"><Icon name={mode === 'ask' ? 'spark' : 'search'} size={18} /></span>
 	<input
 		bind:this={input}
 		bind:value={q}
@@ -83,7 +84,7 @@
 		<section>
 			<div class="ask-head">
 				<p class="note">{askNote}</p>
-				<button class="btn" onclick={() => player.playContext(askTracks, 0)}>▶ Play all</button>
+				<button class="btn" onclick={() => player.playContext(askTracks, 0)}><Icon name="play" size={15} /> Play all</button>
 			</div>
 			<div class="tracks">
 				{#each askTracks as t, i (t.id)}
@@ -144,11 +145,12 @@
 	}
 	.searchbar .ico {
 		position: absolute;
+		display: flex;
+		align-items: center;
 		left: 0.8rem;
 		top: 50%;
 		transform: translateY(-50%);
 		color: var(--text-faint);
-		font-size: 1.1rem;
 	}
 	.searchbar input {
 		padding-left: 2.4rem;
@@ -179,6 +181,9 @@
 		margin-bottom: 0.8rem;
 	}
 	.mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
 		padding: 0.35rem 0.9rem;
 		border-radius: 999px;
 		border: 1px solid var(--border);

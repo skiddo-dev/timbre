@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import TrackRow from '$lib/components/TrackRow.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import { player } from '$lib/audio/player.svelte';
 	import { formatDuration } from '$lib/format';
 
@@ -16,8 +17,8 @@
 	<h1>{data.playlist.name}</h1>
 	<div class="facts muted mono">{tracks.length} tracks · {formatDuration(totalMs)}</div>
 	<div class="actions">
-		<button class="btn btn-accent" onclick={() => tracks.length && player.playContext(tracks, 0)}>▶ Play</button>
-		<button class="btn" onclick={() => { for (const t of tracks) player.enqueue(t); }}>＋ Queue</button>
+		<button class="btn btn-accent" onclick={() => tracks.length && player.playContext(tracks, 0)}><Icon name="play" size={15} /> Play</button>
+		<button class="btn" onclick={() => { for (const t of tracks) player.enqueue(t); }}><Icon name="plus" size={15} /> Queue</button>
 	</div>
 </header>
 
