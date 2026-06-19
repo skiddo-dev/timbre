@@ -26,6 +26,18 @@ library, artwork, playback, analysis — stays on that machine.
   natural-language **Ask** search ("mellow jazz for a rainy evening"). The model only ever resolves
   to tracks that exist in your library, and everything degrades to deterministic heuristics with no
   model — so it works offline and under `TIMBRE_FAKE_LLM=1`.
+- **Streaming providers (Subsonic / OpenSubsonic)** — connect a self-hosted server (Navidrome,
+  Airsonic, Gonic…) in **Settings** and browse + stream it from the **Streaming** page (`/subsonic`), right through
+  Timbre's transport. Real audio in — no DRM, no subscription; your password is salted-hashed per
+  request (Subsonic auth) and never reaches the browser (streams + art proxy through the server).
+- **Parametric EQ + room correction** — the `/dsp` screen is a multi-band parametric EQ with a live
+  magnitude curve, presets, a convolution slot for a measured room impulse response (a WAV), and REW /
+  EqualizerAPO import. The profile is applied **everywhere Timbre plays** — in-browser via Web Audio
+  and on every cast output via ffmpeg — and is bypassed in bit-perfect mode.
+- **One transport, any output** — the now-playing dock's output picker plays the one shared queue on
+  **this device**, a **Snapcast zone**, or an **AirPlay device**, with the same controls; switching
+  output hands off the queue + position. Local, Subsonic and radio sources all cast (the server
+  resolves each to an ffmpeg input).
 - **Multi-room (Snapcast)** — the `/zones` screen manages synchronized, bit-perfect whole-home audio
   via [Snapcast](https://github.com/badaix/snapcast): group rooms, route streams, balance per-room
   volume, and cast the play queue to your rooms. Disabled until you set `SNAPCAST_HOST`.
@@ -64,7 +76,10 @@ Open **Settings**, point Timbre at your music folder, hit **Rescan**, then (opti
 | `DATABASE_PATH` | SQLite library DB (default `data/timbre.db`) |
 | `MUSIC_DIR` | Folder to index (can also be set in Settings, which overrides this) |
 | `ART_CACHE_DIR` | Where fetched art is cached (default `data/art`) |
-| `FFMPEG_BIN` | ffmpeg binary — optional, loudness scan only |
+| `FFMPEG_BIN` | ffmpeg binary — used by the loudness scan, on-the-fly transcode, and server-side DSP / cast feeder |
+| `DSP_DIR` | Where room-correction impulse-response files are stored (default alongside the DB) |
+| `SUBSONIC_URL` / `SUBSONIC_USER` / `SUBSONIC_PASS` | Subsonic/OpenSubsonic server (optional — usually set in Settings, which overrides this) |
+| `TIMBRE_FAKE_SUBSONIC` | `1` → offline canned Subsonic fixtures (tests) |
 | `MUSICBRAINZ_UA` | Required User-Agent for MusicBrainz |
 | `TIMBRE_FAKE_ENRICH` | `1` → offline canned enrichment (tests) |
 | `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_MODEL` | Wired but unused until the M7 discovery brain |
@@ -79,6 +94,7 @@ Open **Settings**, point Timbre at your music folder, hit **Rescan**, then (opti
 rm -f /tmp/timbre.db*
 DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
   ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 TIMBRE_FAKE_LASTFM=1 \
+  TIMBRE_FAKE_APPLEMUSIC=1 SNAPCAST_HOST=127.0.0.1 SNAPCAST_RPC_PORT=1799 \
   NNTP_HOST=127.0.0.1 NNTP_PORT=1819 NNTP_SSL=0 NNTP_USER=u NNTP_PASS=p \
   SABNZBD_URL=http://127.0.0.1:1820 SABNZBD_API_KEY=mock \
   npm run dev -- --port 5181 --host 127.0.0.1 &
@@ -86,10 +102,11 @@ MUSIC_DIR=/tmp/timbre-verify-music npm run verify
 ```
 
 The harness writes tagged WAV fixtures, then asserts the full scan → stream(+Range) → search →
-album page → queue/player → enrich → loudness → discovery → scrobble → **Usenet** pipeline over
-HTTP. The Usenet section spins up mock Newznab / NNTP / SABnzbd servers (the `NNTP_*` / `SABNZBD_*`
-env points the dev server at them) and grabs a release through **both** engines, asserting the
-yEnc round-trip is byte-exact (NNTP → kernel → disk).
+album page → queue/player → enrich → loudness → discovery → scrobble → **Usenet** → **Subsonic
+provider** → **DSP** → **unified transport** pipeline over HTTP. It spins up mock Newznab / NNTP /
+SABnzbd servers (Usenet), a mock snapserver (zones + transport routing, via `SNAPCAST_HOST`), and a
+mock Subsonic server (the provider configures itself against it). The Usenet section grabs a release
+through **both** engines, asserting the yEnc round-trip is byte-exact (NNTP → kernel → disk).
 
 ## Multi-room setup (Snapcast)
 
@@ -141,21 +158,29 @@ installed. The yEnc decode runs on the same hand-authored WASM kernel as the lou
 - ✅ **Last.fm scrobbling**: opt-in now-playing + scrobble with an offline retry queue.
 - ✅ **M7 — Local-AI discovery brain**: auto-tagging, Radio, natural-language Ask.
 - ✅ **M6 — Snapcast multi-room**: `/zones` control plane + queue casting via the FIFO feeder.
-- ✅ **Non-local sources**: internet radio (`/radio`) over the `streamUrl` seam — the model for
-  adding Subsonic/Tidal/Qobuz providers later (those need accounts + unofficial APIs, so they're
-  out of scope here).
+- ✅ **Non-local sources**: internet radio (`/radio`) over the `streamUrl` seam — the model that the
+  Subsonic provider below was built on.
 - ✅ **On-the-fly transcode** for exotic codecs, **live zone updates** (SSE, no more polling), and a
   best-effort **AirPlay output** via pyatv (`AIRPLAY_ENABLED=1`).
 - ✅ **Usenet (NZB) acquisition** (`/usenet`): Newznab search + a SABnzbd client and a from-scratch
   NNTP + yEnc engine (with a hand-authored WASM decode kernel) → straight into the library.
-- Later: real streaming-service providers, richer DSP (parametric EQ / room correction), and
-  unifying the browser player with the Snapcast/AirPlay output stages behind one transport.
+- ✅ **Real streaming providers**: a Subsonic / OpenSubsonic provider (`/subsonic`) — a self-hosted
+  remote library streamed through the transport (no DRM, no subscription). Commercial services
+  (Tidal/Qobuz/Spotify) stay out of scope by design — DRM can't enter a self-hosted pipeline.
+- ✅ **Richer DSP** (`/dsp`): a multi-band parametric EQ + convolution room correction (REW /
+  EqualizerAPO import), applied in-browser and on every cast output via ffmpeg.
+- ✅ **One transport**: a single queue + controls with a selectable output (this device / a Snapcast
+  zone / an AirPlay device); switching output hands off the queue + position.
 
 ## Architecture
 
 `src/lib/server/` — `db.ts` (schema + migrations), `scan.ts` (indexer), `repo.ts` (all queries),
-`search.ts`, `enrich.ts`, `loudness.ts`, `playback.ts`, `settings.ts`, `llm.ts`.
+`search.ts`, `enrich.ts`, `loudness.ts`, `playback.ts`, `settings.ts`, `llm.ts`, `subsonic.ts`
+(the streaming provider), `dsp.ts` (profile + IR storage), `transport.ts` (the output coordinator),
+`streamer.ts` (Snapcast FIFO feeder), `snapcast.ts` (zone control plane), `airplay.ts`.
 `src/lib/server/usenet/` — `indexer.ts` (Newznab search), `nzb.ts` + `yenc.ts` + `nntp.ts` (the
 built-in download engine), `sab.ts` (SABnzbd client), `downloads.ts` (engine-picking orchestrator).
+`src/lib/dsp.ts` — the isomorphic DSP profile (Web Audio + ffmpeg filter graph from one source).
 `src/lib/wasm/` — the kernel loader + JS twins (`scripts/gen-wasm-kernels.mjs` authors the bytes).
-`src/lib/audio/player.svelte.ts` — the client playback engine. `src/routes/` — pages + `/api`.
+`src/lib/audio/player.svelte.ts` — the client playback engine (target-aware: browser ↔ cast).
+`src/routes/` — pages + `/api`.

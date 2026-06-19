@@ -44,6 +44,8 @@ const ICONS = {
 	zones: '<rect x="6" y="3.5" width="12" height="17" rx="2"/><circle cx="12" cy="14" r="3.4"/><circle cx="12" cy="7.25" r="1.25"/>',
 	// Mixer faders — settings, audio-style.
 	settings: '<path d="M5 4v6"/><path d="M5 14v6"/><path d="M12 4v3"/><path d="M12 11v9"/><path d="M19 4v9"/><path d="M19 17v3"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="9" r="2"/><circle cx="19" cy="15" r="2"/>',
+	// Remote library server — a stacked NAS with status lights. Streaming source.
+	stream: '<rect x="3.5" y="5" width="17" height="5.5" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="5.5" rx="1.5"/><circle cx="7" cy="7.75" r="0.6"/><circle cx="7" cy="16.25" r="0.6"/><path d="M14.5 7.75h3"/><path d="M14.5 16.25h3"/>',
 
 	/* ── Transport (mostly SOLID) ───────────────────────────────────── */
 	play: '<path d="M7 4.8v14.4L19.5 12Z"/>',
@@ -90,6 +92,7 @@ const FILLS: Partial<Record<keyof typeof ICONS, string>> = {
 	radio: '<circle cx="12" cy="12" r="1.9"/>',
 	search: '<circle cx="11" cy="11" r="5.75"/>',
 	zones: '<rect x="6" y="3.5" width="12" height="17" rx="2"/>',
+	stream: '<rect x="3.5" y="5" width="17" height="5.5" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="5.5" rx="1.5"/>',
 	settings: '<circle cx="5" cy="12" r="2"/><circle cx="12" cy="9" r="2"/><circle cx="19" cy="15" r="2"/>',
 	target: '<circle cx="12" cy="12" r="3"/>',
 	levels: '<circle cx="13.5" cy="8" r="2"/><circle cx="8.5" cy="16" r="2"/>',

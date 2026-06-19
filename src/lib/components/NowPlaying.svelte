@@ -9,6 +9,42 @@
 
 	let showQueue = $state(false);
 
+	// ── output picker (this device / Snapcast zones / AirPlay devices) ─────────
+	let showOutput = $state(false);
+	let zones = $state<{ id: string; name: string }[]>([]);
+	let airDevices = $state<{ id: string; name: string }[]>([]);
+	let outBusy = $state(false);
+
+	async function loadOutputs() {
+		outBusy = true;
+		try {
+			const [z, a] = await Promise.all([
+				fetch('/api/zones').then((r) => r.json()).catch(() => null),
+				fetch('/api/airplay?scan=1').then((r) => r.json()).catch(() => null)
+			]);
+			zones = z?.configured && z?.reachable ? (z.groups ?? []).map((g: { id: string; name: string }) => ({ id: g.id, name: g.name })) : [];
+			airDevices = a?.enabled ? (a.devices ?? []).map((d: { id: string; name: string }) => ({ id: d.id, name: d.name })) : [];
+		} finally {
+			outBusy = false;
+		}
+	}
+
+	function openOutput() {
+		showOutput = !showOutput;
+		if (showOutput) void loadOutputs();
+	}
+
+	async function pick(target: 'browser' | 'snapcast' | 'airplay', id: string | null = null) {
+		showOutput = false;
+		await player.setOutput(target, id);
+	}
+
+	const outputLabel = $derived.by(() => {
+		if (player.output === 'browser') return 'This device';
+		const list = player.output === 'snapcast' ? zones : airDevices;
+		return list.find((x) => x.id === player.outputId)?.name ?? (player.output === 'snapcast' ? 'Zone' : 'AirPlay');
+	});
+
 	// the dock breathes with the current track's cover colour
 	let art = $state('var(--accent-rgb)');
 	$effect(() => {
@@ -27,7 +63,9 @@
 	});
 
 	onMount(() => {
-		player.hydrate();
+		player.hydrate().then(() => {
+			if (player.isRemote) void loadOutputs(); // resolve the active output's name
+		});
 		const onKey = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
 				e.preventDefault();
@@ -91,7 +129,13 @@
 			<a href={`/albums/${cur.albumId}`} class="art"><Cover albumId={cur.albumId} alt={cur.title} /></a>
 			<div class="meta">
 				<div class="title" title={cur.title}>{cur.title}</div>
-				<a class="artist muted" href="/artists">{cur.artist}</a>
+				{#if player.isRemote}
+					<button class="artist on-air" onclick={openOutput} title="Change output">
+						<Icon name="zones" size={12} /> {outputLabel}
+					</button>
+				{:else}
+					<a class="artist muted" href="/artists">{cur.artist}</a>
+				{/if}
 			</div>
 			<div class="eq" class:on={player.playing} aria-hidden="true">
 				{#each [0, 1, 2, 3] as b (b)}
@@ -161,6 +205,18 @@
 				onclick={() => player.toggleLeveling()}
 				aria-label="Volume leveling"
 				title={player.bitPerfect ? 'Leveling is off in bit-perfect mode' : 'Volume leveling (ReplayGain)'}><Icon name="levels" size={17} /></button>
+			<button
+				class="ico"
+				class:active={player.dsp.enabled && !player.bitPerfect}
+				onclick={() => goto('/dsp')}
+				aria-label="Equalizer"
+				title={player.bitPerfect ? 'EQ is bypassed in bit-perfect mode' : 'Equalizer & room correction'}><Icon name="settings" size={17} /></button>
+			<button
+				class="ico"
+				class:active={player.isRemote || showOutput}
+				onclick={openOutput}
+				title={player.isRemote ? `Playing on ${outputLabel}` : 'Play on another device'}
+				aria-label="Output device"><Icon name="zones" size={17} /></button>
 			<button class="ico" class:active={showQueue} onclick={() => (showQueue = !showQueue)} title="Queue" aria-label="Queue"><Icon name="queue" size={17} /></button>
 			<div class="vol">
 				<span class="ico-static"><Icon name="volume" size={17} /></span>
@@ -207,6 +263,51 @@
 					<li class="muted empty">Queue is empty.</li>
 				{/each}
 			</ol>
+		</div>
+	{/if}
+
+	{#if showOutput}
+		<div class="output-panel">
+			<header>
+				<strong>Play on</strong>
+				<button class="btn btn-ghost" onclick={() => (showOutput = false)} aria-label="Close"><Icon name="x" size={15} /></button>
+			</header>
+			<ul>
+				<li>
+					<button class="out" class:now={player.output === 'browser'} onclick={() => pick('browser')}>
+						<span class="out-ico"><Icon name="target" size={16} /></span>
+						<span class="out-name">This device</span>
+						{#if player.output === 'browser'}<Icon name="check" size={14} />{/if}
+					</button>
+				</li>
+				{#if zones.length}
+					<li class="group-label muted">Snapcast zones</li>
+					{#each zones as z (z.id)}
+						<li>
+							<button class="out" class:now={player.output === 'snapcast' && player.outputId === z.id} onclick={() => pick('snapcast', z.id)}>
+								<span class="out-ico"><Icon name="zones" size={16} /></span>
+								<span class="out-name">{z.name}</span>
+								{#if player.output === 'snapcast' && player.outputId === z.id}<Icon name="check" size={14} />{/if}
+							</button>
+						</li>
+					{/each}
+				{/if}
+				{#if airDevices.length}
+					<li class="group-label muted">AirPlay</li>
+					{#each airDevices as d (d.id)}
+						<li>
+							<button class="out" class:now={player.output === 'airplay' && player.outputId === d.id} onclick={() => pick('airplay', d.id)}>
+								<span class="out-ico"><Icon name="volume" size={16} /></span>
+								<span class="out-name">{d.name}</span>
+								{#if player.output === 'airplay' && player.outputId === d.id}<Icon name="check" size={14} />{/if}
+							</button>
+						</li>
+					{/each}
+				{/if}
+				{#if !zones.length && !airDevices.length}
+					<li class="muted empty">{outBusy ? 'Looking for outputs…' : 'No Snapcast zones or AirPlay devices found.'}</li>
+				{/if}
+			</ul>
 		</div>
 	{/if}
 </div>
@@ -461,7 +562,19 @@
 		gap: 0.35rem;
 	}
 
-	.queue-panel {
+	.on-air {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		background: none;
+		border: none;
+		color: var(--accent);
+		padding: 0;
+		font-size: 0.82rem;
+		cursor: pointer;
+	}
+	.queue-panel,
+	.output-panel {
 		position: absolute;
 		right: 1rem;
 		bottom: calc(var(--dock-h) + 0.5rem);
@@ -472,6 +585,59 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
 		box-shadow: var(--shadow);
+		z-index: 40;
+	}
+	.output-panel header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.7rem 0.9rem;
+		border-bottom: 1px solid var(--border-soft);
+		position: sticky;
+		top: 0;
+		background: var(--surface-2);
+	}
+	.output-panel ul {
+		list-style: none;
+		margin: 0;
+		padding: 0.4rem;
+	}
+	.output-panel .group-label {
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		padding: 0.5rem 0.6rem 0.2rem;
+	}
+	.out {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		background: none;
+		border: none;
+		color: inherit;
+		text-align: left;
+		padding: 0.5rem 0.6rem;
+		border-radius: 6px;
+	}
+	.out:hover {
+		background: var(--surface-3);
+	}
+	.out.now {
+		color: var(--accent);
+	}
+	.out-ico {
+		display: inline-flex;
+		color: var(--text-faint);
+	}
+	.out.now .out-ico {
+		color: var(--accent);
+	}
+	.out-name {
+		flex: 1;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.queue-panel header {
 		display: flex;

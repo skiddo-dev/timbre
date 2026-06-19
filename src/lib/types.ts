@@ -99,12 +99,45 @@ export interface QueueItem {
 	track: Track;
 }
 
+export type OutputTarget = 'browser' | 'snapcast' | 'airplay';
+
+// A queue item the client hands to a non-browser output. The server resolves each
+// to an ffmpeg input itself (re-deriving Subsonic's authed URL from remoteId — it
+// never trusts a client-supplied stream URL).
+export interface Playable {
+	source: 'local' | 'subsonic' | 'radio';
+	trackId?: number; // local track id
+	remoteId?: string; // subsonic remote song id
+	url?: string; // radio/stream direct url
+	title: string;
+	artist: string;
+	album?: string | null;
+	durationMs: number;
+}
+
+export interface TransportStatus {
+	output: OutputTarget;
+	outputId: string | null;
+	casting: boolean; // a non-browser output is actively playing
+	playing: boolean;
+	paused: boolean;
+	index: number;
+	currentTrackId: number | null;
+	positionMs: number; // estimate for cast/airplay (start time + elapsed)
+	durationMs: number;
+	title: string | null;
+	artist: string | null;
+	error: string | null;
+}
+
 export interface PlayerState {
 	currentTrackId: number | null;
 	positionMs: number;
 	volume: number; // 0..1
 	shuffle: boolean;
 	repeat: 'off' | 'all' | 'one';
+	output: OutputTarget; // where audio is rendered (default 'browser' = this device)
+	outputId: string | null; // snapcast group id / airplay device id
 }
 
 // ── Last.fm scrobbling ───────────────────────────────────────────────────────
@@ -150,6 +183,35 @@ export interface AppleEnrichResult {
 	genres: string[]; // Apple catalog genreNames
 	editorial: boolean; // an editorial note filled the descriptor
 	error: string | null;
+}
+
+// ── Subsonic / OpenSubsonic provider (a real, playable remote library) ─────────
+export interface SubsonicStatus {
+	configured: boolean; // a server URL + user + password are present (or fake)
+	hasPassword: boolean; // a password is stored (never the value itself)
+	url: string; // the configured server base (shown in Settings)
+	user: string;
+	fake: boolean; // TIMBRE_FAKE_SUBSONIC — offline deterministic fixtures
+	reachable?: boolean; // set after a ping (configure/test)
+	error?: string | null;
+}
+
+export interface SubsonicAlbum {
+	id: string;
+	name: string;
+	artist: string;
+	artistId: string | null;
+	year: number | null;
+	coverArtUrl: string | null; // a proxy URL (/api/subsonic/art/…), creds never leak
+	songCount: number | null;
+	durationMs: number | null;
+}
+
+export interface SubsonicArtist {
+	id: string;
+	name: string;
+	albumCount: number | null;
+	coverArtUrl: string | null;
 }
 
 export interface ScanStatus {

@@ -18,18 +18,28 @@ export const POST: RequestHandler = async ({ request }) => {
 		trackId?: number;
 		startedAt?: number;
 		flush?: boolean;
+		artist?: string;
+		title?: string;
+		album?: string;
 	};
 
 	// Retry-only: drain whatever is already queued.
-	if (body.flush && body.trackId == null) {
+	if (body.flush && body.trackId == null && !body.title) {
 		const flush = await flushScrobbles();
 		return json({ flush, status: lastfmStatus() });
 	}
 
-	const id = Number(body.trackId);
-	if (!Number.isFinite(id)) throw error(400, 'Missing trackId.');
-	const meta = trackForScrobble(id);
-	if (!meta) throw error(404, 'Unknown track.');
+	// A remote/stream track (Subsonic, radio) has no local id — scrobble by metadata.
+	// Otherwise snapshot the local track's metadata so the scrobble survives deletion.
+	let meta: { trackId: number | null; artist: string; title: string; album: string | null } | null = body.title
+		? { trackId: null, artist: (body.artist ?? '').trim(), title: body.title.trim(), album: (body.album ?? '').trim() || null }
+		: null;
+	if (!meta) {
+		const id = Number(body.trackId);
+		if (!Number.isFinite(id)) throw error(400, 'Missing trackId.');
+		meta = trackForScrobble(id);
+		if (!meta) throw error(404, 'Unknown track.');
+	}
 	if (!meta.artist || !meta.title) {
 		// Nothing to scrobble against — skip rather than queue a row Last.fm rejects.
 		return json({ ok: true, skipped: 'missing artist/title' });

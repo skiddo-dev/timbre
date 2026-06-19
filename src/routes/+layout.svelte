@@ -13,6 +13,7 @@
 		{ href: '/artists', label: 'Artists', icon: 'artists' },
 		{ href: '/playlists', label: 'Playlists', icon: 'playlists' },
 		{ href: '/radio', label: 'Radio', icon: 'radio' },
+		{ href: '/subsonic', label: 'Streaming', icon: 'stream' },
 		{ href: '/usenet', label: 'Usenet', icon: 'download' },
 		{ href: '/search', label: 'Search', icon: 'search' },
 		{ href: '/zones', label: 'Zones', icon: 'zones' },

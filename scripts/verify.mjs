@@ -5,17 +5,21 @@
 //   DATABASE_PATH=/tmp/timbre.db MUSIC_DIR=/tmp/timbre-verify-music \
 //     ART_CACHE_DIR=/tmp/timbre-art TIMBRE_FAKE_ENRICH=1 TIMBRE_FAKE_LASTFM=1 \
 //     TIMBRE_FAKE_APPLEMUSIC=1 \
+//     SNAPCAST_HOST=127.0.0.1 SNAPCAST_RPC_PORT=1799 \
 //     NNTP_HOST=127.0.0.1 NNTP_PORT=1819 NNTP_SSL=0 NNTP_USER=u NNTP_PASS=p \
 //     SABNZBD_URL=http://127.0.0.1:1820 SABNZBD_API_KEY=mock \
 //     npm run dev -- --port 5181 &
 //   MUSIC_DIR=/tmp/timbre-verify-music node scripts/verify.mjs
 //
 // Writes tagged WAV fixtures into MUSIC_DIR, then drives the scan → stream(+Range)
-// → search → album page → queue/player → enrich → loudness → Usenet pipeline over
-// HTTP. The Usenet section needs the NNTP_*/SABNZBD_* env above (mock ports).
+// → search → album page → queue/player → enrich → loudness → Usenet → Subsonic
+// provider → DSP → unified-transport pipeline over HTTP. The Usenet section needs
+// the NNTP_*/SABNZBD_* env above; zones/transport need SNAPCAST_HOST (→ the mock
+// snapserver); Subsonic configures itself against the in-process mock.
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockSnapserver } from './mock-snapserver.mjs';
+import { createMockSubsonic } from './mock-subsonic.mjs';
 import { createMockNntp, createMockNewznab, createMockSab, buildNzb } from './mock-usenet.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:5181';
@@ -87,6 +91,10 @@ console.log(`wrote ${fixtures.length} tagged WAV fixtures to ${MUSIC_DIR}`);
 // fake snapserver for the zones control plane (the dev server connects to it via
 // SNAPCAST_HOST/SNAPCAST_RPC_PORT). Harmless if the dev server has no SNAPCAST_HOST.
 const mock = await createMockSnapserver(Number(process.env.SNAP_MOCK_PORT) || 1799);
+
+// fake Subsonic/OpenSubsonic server for the streaming-provider section (the dev
+// server connects to it via the URL we POST to /api/subsonic configure).
+const subMock = await createMockSubsonic(Number(process.env.SUB_MOCK_PORT) || 4599);
 
 const getJson = async (p) => (await fetch(`${BASE}${p}`)).json();
 const post = (action, extra = {}) => ({
@@ -506,6 +514,100 @@ if (am0.configured) {
 	nzMock.close();
 }
 
+// 19) Subsonic / OpenSubsonic provider — a real, playable remote library. Configure
+//     against the in-process mock server, browse + drill + search, then stream a
+//     track through the auth-proxy (Range too). The remote stays remote: tracks map
+//     to source='subsonic' with a /api/subsonic/stream proxy URL.
+let subAlbumTracks = [];
+{
+	const sub0 = await getJson('/api/subsonic');
+	ok(typeof sub0.configured === 'boolean', 'subsonic status returns a shape');
+
+	const cfg = await (await fetch(`${BASE}/api/subsonic`, post('configure', { url: subMock.url, user: 'demo', pass: 'secret' }))).json();
+	ok(cfg.configured && cfg.reachable, `subsonic configured + reachable (${cfg.error ?? 'ok'})`);
+
+	const browse = await getJson('/api/subsonic?op=albums&type=newest');
+	ok(Array.isArray(browse.albums) && browse.albums.length >= 1, `browsed ${browse.albums?.length ?? 0} remote album(s)`);
+	const alId = browse.albums[0]?.id;
+
+	const al = await getJson(`/api/subsonic?op=album&id=${encodeURIComponent(alId)}`);
+	subAlbumTracks = al.tracks ?? [];
+	ok(subAlbumTracks.length >= 1, `remote album has ${subAlbumTracks.length} track(s)`);
+	ok(
+		subAlbumTracks.every((t) => t.source === 'subsonic' && (t.streamUrl || '').startsWith('/api/subsonic/stream/')),
+		'remote tracks map to source=subsonic + a proxy streamUrl'
+	);
+
+	const remoteId = subAlbumTracks[0]?.sourceUrl;
+	const full = await fetch(`${BASE}/api/subsonic/stream/${encodeURIComponent(remoteId)}`);
+	ok(full.ok && (full.headers.get('content-type') || '').startsWith('audio/'), `stream proxy served audio → ${full.status} ${full.headers.get('content-type')}`);
+	const partial = await fetch(`${BASE}/api/subsonic/stream/${encodeURIComponent(remoteId)}`, { headers: { Range: 'bytes=0-99' } });
+	ok(partial.status === 206 && partial.headers.get('content-range')?.startsWith('bytes 0-99/'), `stream proxy Range → 206 (${partial.status})`);
+
+	const subSearch = await getJson(`/api/subsonic?op=search&q=${encodeURIComponent('Remote')}`);
+	ok((subSearch.albums?.length ?? 0) >= 1 || (subSearch.tracks?.length ?? 0) >= 1, 'subsonic search returned hits');
+
+	const subHtml = await (await fetch(`${BASE}/subsonic`)).text();
+	ok(/Streaming/.test(subHtml), '/subsonic page renders the browse surface');
+}
+
+// 20) DSP — shared parametric EQ + room-correction profile (browser + cast). Round-trip
+//     a profile, parse a REW/EqualizerAPO import, and confirm the transcode path still
+//     serves audio with DSP on (ffmpeg-absent → graceful, like the loudness section).
+{
+	const dsp0 = await getJson('/api/dsp');
+	ok(dsp0.profile && Array.isArray(dsp0.profile.bands), 'dsp profile returns a shape');
+	ok(Array.isArray(dsp0.presets) && dsp0.presets.length >= 1, `dsp exposes ${dsp0.presets?.length ?? 0} preset(s)`);
+
+	const profile = { enabled: true, preampDb: -3, bands: [{ type: 'peaking', freq: 1000, gain: -4, q: 1.2, enabled: true }], room: { enabled: false, irName: null } };
+	const saved = await (await fetch(`${BASE}/api/dsp`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) })).json();
+	ok(saved.profile.enabled && saved.profile.bands.length === 1 && saved.profile.preampDb === -3, 'dsp profile saved + clamped');
+	const reread = await getJson('/api/dsp');
+	ok(reread.profile.bands[0]?.type === 'peaking' && reread.profile.bands[0]?.id, 'dsp profile round-trips (band ids assigned)');
+
+	const apo = await (await fetch(`${BASE}/api/dsp`, post('import-apo', { text: 'Preamp: -6 dB\nFilter 1: ON PK Fc 1000 Hz Gain -3 dB Q 1.4\nFilter 2: ON LS Fc 80 Hz Gain 4 dB Q 0.7' }))).json();
+	ok(apo.bands?.length === 2 && apo.preampDb === -6, `EqualizerAPO import parsed ${apo.bands?.length ?? 0} band(s) + preamp`);
+
+	const dspHtml = await (await fetch(`${BASE}/dsp`)).text();
+	ok(/Equalizer/.test(dspHtml), '/dsp editor page renders');
+
+	const tc = await fetch(`${BASE}/api/stream/${track.id}?transcode=1`);
+	ok(tc.ok && (tc.headers.get('content-type') || '').startsWith('audio/'), `transcode with DSP enabled served audio → ${tc.status}`);
+
+	// reset to a flat/off profile so it doesn't colour later runs
+	await fetch(`${BASE}/api/dsp`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false, preampDb: 0, bands: [], room: { enabled: false, irName: null } }) });
+}
+
+// 21) Unified transport — one queue, selectable output. Switch the output to a Snapcast
+//     zone (control-plane routing; the FIFO audio feeder needs daemons we don't have, so
+//     those bits degrade-and-skip), then back to this device. AirPlay is off by default.
+{
+	const zonesT = await getJson('/api/zones');
+	if (zonesT.configured && zonesT.reachable && zonesT.groups.length) {
+		const groupId = zonesT.groups[0].id;
+		const playables = subAlbumTracks.slice(0, 2).map((t) => ({ source: 'subsonic', remoteId: t.sourceUrl, title: t.title, artist: t.artist, durationMs: t.durationMs }));
+		const setSnap = await (await fetch(`${BASE}/api/transport`, post('setOutput', { target: 'snapcast', id: groupId, playables, index: 0 }))).json();
+		ok(setSnap.output === 'snapcast' && setSnap.outputId === groupId, `transport switched to a Snapcast zone (${setSnap.output})`);
+
+		const afterRoute = await getJson('/api/zones');
+		const g0 = afterRoute.groups.find((g) => g.id === groupId);
+		ok(g0?.streamId === 'Timbre', `zone routed to the Timbre stream (${g0?.streamId})`);
+
+		const tstat = await getJson('/api/transport');
+		ok(tstat.output === 'snapcast', 'GET transport reports the snapcast output');
+
+		const setBrowser = await (await fetch(`${BASE}/api/transport`, post('setOutput', { target: 'browser' }))).json();
+		ok(setBrowser.output === 'browser', 'transport switched back to this device');
+	} else {
+		console.log('  (SNAPCAST_HOST not set on the dev server — transport/zone routing skipped)');
+	}
+
+	const ap = await (await fetch(`${BASE}/api/transport`, post('setOutput', { target: 'airplay', id: 'x' }))).json();
+	ok(ap.output === 'airplay' && /AirPlay is disabled/.test(ap.error || ''), 'airplay output reports disabled by default');
+	await fetch(`${BASE}/api/transport`, post('setOutput', { target: 'browser' })); // reset
+}
+
+subMock.close();
 mock.close();
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
