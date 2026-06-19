@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import Icon from '$lib/components/Icon.svelte';
 </script>
 
 <div class="err">
 	<div class="code mono">{$page.status}</div>
 	<h1>{$page.status === 404 ? 'Not found' : 'Something went wrong'}</h1>
 	<p class="muted">{$page.error?.message ?? 'An unexpected error occurred.'}</p>
-	<a class="btn" href="/">← Back home</a>
+	<a class="btn" href="/"><Icon name="arrow-left" size={15} /> Back home</a>
 </div>
 
 <style>

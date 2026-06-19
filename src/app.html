@@ -5,11 +5,28 @@
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="color-scheme" content="dark" />
-		<link rel="preconnect" href="https://fonts.googleapis.com" />
-		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<!-- Self-hosted fonts (no external CDN) — preload the faces above the fold:
+		     the Bricolage wordmark/headings and the Inter UI body. -->
 		<link
-			href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
-			rel="stylesheet"
+			rel="preload"
+			href="%sveltekit.assets%/fonts/bricolage-600.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+		<link
+			rel="preload"
+			href="%sveltekit.assets%/fonts/inter-400.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+		<link
+			rel="preload"
+			href="%sveltekit.assets%/fonts/inter-500.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
 		/>
 		<title>Timbre</title>
 		%sveltekit.head%

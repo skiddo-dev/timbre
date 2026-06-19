@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Album } from '$lib/types';
 	import Cover from './Cover.svelte';
+	import Icon from './Icon.svelte';
 
 	let { album }: { album: Album } = $props();
 </script>
@@ -8,7 +9,7 @@
 <a class="card" href={`/albums/${album.id}`}>
 	<div class="art">
 		<Cover albumId={album.id} hasArt={album.hasArt} alt={album.title} />
-		<span class="play" aria-hidden="true">▶</span>
+		<span class="play" aria-hidden="true"><Icon name="play" size={15} /></span>
 	</div>
 	<div class="title" title={album.title}>{album.title}</div>
 	<div class="sub muted" title={album.albumArtist}>

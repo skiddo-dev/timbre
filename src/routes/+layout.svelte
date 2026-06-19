@@ -2,19 +2,21 @@
 	import '../app.css';
 	import { page } from '$app/stores';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
+	import Icon from '$lib/components/Icon.svelte';
+	import type { IconName } from '$lib/icons';
 
 	let { children } = $props();
 
-	const nav = [
-		{ href: '/', label: 'Home', icon: '◉' },
-		{ href: '/albums', label: 'Albums', icon: '▦' },
-		{ href: '/artists', label: 'Artists', icon: '☻' },
-		{ href: '/playlists', label: 'Playlists', icon: '≣' },
-		{ href: '/radio', label: 'Radio', icon: '◍' },
-		{ href: '/usenet', label: 'Usenet', icon: '⇣' },
-		{ href: '/search', label: 'Search', icon: '⌕' },
-		{ href: '/zones', label: 'Zones', icon: '◫' },
-		{ href: '/settings', label: 'Settings', icon: '⚙' }
+	const nav: { href: string; label: string; icon: IconName }[] = [
+		{ href: '/', label: 'Home', icon: 'home' },
+		{ href: '/albums', label: 'Albums', icon: 'albums' },
+		{ href: '/artists', label: 'Artists', icon: 'artists' },
+		{ href: '/playlists', label: 'Playlists', icon: 'playlists' },
+		{ href: '/radio', label: 'Radio', icon: 'radio' },
+		{ href: '/usenet', label: 'Usenet', icon: 'download' },
+		{ href: '/search', label: 'Search', icon: 'search' },
+		{ href: '/zones', label: 'Zones', icon: 'zones' },
+		{ href: '/settings', label: 'Settings', icon: 'settings' }
 	];
 
 	const active = (href: string, path: string) =>
@@ -24,13 +26,13 @@
 <div class="app">
 	<aside class="sidebar">
 		<a href="/" class="brand">
-			<span class="brand-mark">◉</span>
+			<span class="brand-mark"><Icon name="logo" size={22} /></span>
 			<span class="brand-name">Timbre</span>
 		</a>
 		<nav>
 			{#each nav as item (item.href)}
 				<a href={item.href} class="nav-link" class:active={active(item.href, $page.url.pathname)}>
-					<span class="nav-icon">{item.icon}</span>
+					<span class="nav-icon"><Icon name={item.icon} size={20} /></span>
 					{item.label}
 				</a>
 			{/each}
@@ -74,9 +76,9 @@
 		letter-spacing: -0.02em;
 	}
 	.brand-mark {
+		display: inline-flex;
 		color: var(--accent);
-		font-size: 1.1rem;
-		text-shadow: 0 0 14px rgba(224, 164, 92, 0.7);
+		filter: drop-shadow(0 0 10px rgba(224, 164, 92, 0.65));
 	}
 	nav {
 		display: flex;
@@ -119,8 +121,10 @@
 		color: var(--accent);
 	}
 	.nav-icon {
-		width: 1.2rem;
-		text-align: center;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.3rem;
 		color: var(--text-faint);
 	}
 	.sidebar-foot {

@@ -5,6 +5,7 @@
 	import { formatDuration, qualityLabel } from '$lib/format';
 	import { ambientColor } from '$lib/ambient';
 	import Cover from './Cover.svelte';
+	import Icon from './Icon.svelte';
 
 	let showQueue = $state(false);
 
@@ -101,14 +102,14 @@
 
 		<div class="center">
 			<div class="transport">
-				<button class="ico" class:active={player.shuffle} onclick={() => player.toggleShuffle()} title="Shuffle">⤮</button>
-				<button class="ico" onclick={() => player.prev()} title="Previous">⏮</button>
-				<button class="play" onclick={() => player.toggle()} title="Play / Pause (Space)">
-					{player.playing ? '⏸' : '▶'}
+				<button class="ico" class:active={player.shuffle} onclick={() => player.toggleShuffle()} title="Shuffle" aria-label="Shuffle"><Icon name="shuffle" size={17} /></button>
+				<button class="ico" onclick={() => player.prev()} title="Previous" aria-label="Previous"><Icon name="prev" size={18} /></button>
+				<button class="play" onclick={() => player.toggle()} title="Play / Pause (Space)" aria-label={player.playing ? 'Pause' : 'Play'}>
+					<Icon name={player.playing ? 'pause' : 'play'} size={18} />
 				</button>
-				<button class="ico" onclick={() => player.next()} title="Next">⏭</button>
-				<button class="ico" class:active={player.repeat !== 'off'} onclick={() => player.cycleRepeat()} title={`Repeat: ${player.repeat}`}>
-					{player.repeat === 'one' ? '🔂' : '🔁'}
+				<button class="ico" onclick={() => player.next()} title="Next" aria-label="Next"><Icon name="next" size={18} /></button>
+				<button class="ico" class:active={player.repeat !== 'off'} onclick={() => player.cycleRepeat()} title={`Repeat: ${player.repeat}`} aria-label={`Repeat: ${player.repeat}`}>
+					<Icon name={player.repeat === 'one' ? 'repeat-one' : 'repeat'} size={17} />
 				</button>
 			</div>
 			<div class="scrub">
@@ -151,16 +152,18 @@
 				class="ico"
 				class:active={player.bitPerfect}
 				onclick={() => player.toggleBitPerfect()}
-				title="Bit-perfect output — bypass app volume & ReplayGain leveling; match your OS device to the track rate">◎</button>
+				aria-label="Bit-perfect output"
+				title="Bit-perfect output — bypass app volume & ReplayGain leveling; match your OS device to the track rate"><Icon name="target" size={17} /></button>
 			<button
 				class="ico"
 				class:active={player.leveling}
 				disabled={player.bitPerfect}
 				onclick={() => player.toggleLeveling()}
-				title={player.bitPerfect ? 'Leveling is off in bit-perfect mode' : 'Volume leveling (ReplayGain)'}>⚖</button>
-			<button class="ico" class:active={showQueue} onclick={() => (showQueue = !showQueue)} title="Queue">≣</button>
+				aria-label="Volume leveling"
+				title={player.bitPerfect ? 'Leveling is off in bit-perfect mode' : 'Volume leveling (ReplayGain)'}><Icon name="levels" size={17} /></button>
+			<button class="ico" class:active={showQueue} onclick={() => (showQueue = !showQueue)} title="Queue" aria-label="Queue"><Icon name="queue" size={17} /></button>
 			<div class="vol">
-				<span class="ico-static">🔈</span>
+				<span class="ico-static"><Icon name="volume" size={17} /></span>
 				<input
 					type="range"
 					min="0"
@@ -185,18 +188,20 @@
 				<strong>Queue</strong>
 				<div>
 					<button class="btn btn-ghost" onclick={() => player.clearQueue()}>Clear</button>
-					<button class="btn btn-ghost" onclick={() => (showQueue = false)}>✕</button>
+					<button class="btn btn-ghost" onclick={() => (showQueue = false)} aria-label="Close queue"><Icon name="x" size={15} /></button>
 				</div>
 			</header>
 			<ol>
 				{#each player.queue as t, i (t.id + '-' + i)}
 					<li class:now={i === player.index}>
 						<button class="q-track" onclick={() => player.playQueueAt(i)}>
-							<span class="q-idx mono">{i === player.index ? '▶' : i + 1}</span>
+							<span class="q-idx mono">
+								{#if i === player.index}<Icon name="play" size={11} />{:else}{i + 1}{/if}
+							</span>
 							<span class="q-title">{t.title}</span>
 							<span class="q-artist muted">{t.artist}</span>
 						</button>
-						<button class="ico sm" onclick={() => player.removeAt(i)} title="Remove">✕</button>
+						<button class="ico sm" onclick={() => player.removeAt(i)} title="Remove" aria-label="Remove from queue"><Icon name="x" size={13} /></button>
 					</li>
 				{:else}
 					<li class="muted empty">Queue is empty.</li>
@@ -301,10 +306,12 @@
 	}
 	.ico,
 	.ico-static {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		background: none;
 		border: none;
 		color: var(--text-dim);
-		font-size: 1rem;
 		padding: 0.25rem;
 		border-radius: 6px;
 		line-height: 1;
@@ -507,10 +514,16 @@
 		min-width: 0;
 	}
 	.q-idx {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		width: 1.5rem;
 		color: var(--text-faint);
 		font-size: 0.78rem;
 		flex: none;
+	}
+	.q-idx :global(.t-icon) {
+		color: var(--accent);
 	}
 	.q-title {
 		flex: 1;

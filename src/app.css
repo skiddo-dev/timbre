@@ -1,3 +1,64 @@
+/* Timbre type — self-hosted, no Google CDN call (a local-first player should
+   not phone home for fonts, and should still render correctly offline). Latin
+   subset, woff2, in static/fonts/. Bricolage Grotesque carries the wordmark and
+   headings; Inter the UI body; JetBrains Mono the durations / rates / dB. */
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('/fonts/bricolage-500.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url('/fonts/bricolage-600.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+	src: url('/fonts/bricolage-700.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/inter-400.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('/fonts/inter-500.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url('/fonts/inter-600.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('/fonts/jetbrains-mono-500.woff2') format('woff2');
+}
+
 /* Timbre design tokens — a dark, art-forward audiophile theme.
    Single source of truth; components reference these vars, never raw hex. */
 :root {
@@ -34,7 +95,7 @@
 	--radius-sm: 8px;
 	--radius-lg: 18px;
 
-	--font-display: 'Space Grotesk', system-ui, sans-serif;
+	--font-display: 'Bricolage Grotesque', 'Inter', system-ui, sans-serif;
 	--font-sans: 'Inter', system-ui, -apple-system, sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
@@ -208,6 +269,16 @@ button:focus-visible {
 }
 .faint {
 	color: var(--text-faint);
+}
+
+/* inline "label →" affordance: keeps the trailing arrow icon on the text baseline */
+.link-arrow {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+}
+.link-arrow:hover {
+	color: var(--accent);
 }
 
 input[type='text'],

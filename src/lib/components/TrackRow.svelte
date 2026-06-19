@@ -2,6 +2,7 @@
 	import type { Track } from '$lib/types';
 	import { formatDuration } from '$lib/format';
 	import { player } from '$lib/audio/player.svelte';
+	import Icon from './Icon.svelte';
 
 	let {
 		track,
@@ -20,21 +21,23 @@
 </script>
 
 <div class="row" class:active>
-	<button class="num" onclick={onplay} title="Play">
+	<button class="num" onclick={onplay} title="Play" aria-label="Play">
 		<span class="idx mono">{index ?? track.trackNo ?? '•'}</span>
-		<span class="play">{active && player.playing ? '❚❚' : '▶'}</span>
+		<span class="play"><Icon name={active && player.playing ? 'pause' : 'play'} size={12} /></span>
 	</button>
 	<button class="main" onclick={onplay}>
 		<span class="title">{track.title}</span>
 		{#if showArtist}<span class="artist muted">{track.artist}</span>{/if}
 	</button>
 	{#if track.sourceUrl}
-		<a class="src" href={track.sourceUrl} target="_blank" rel="noopener noreferrer" title={linkTitle}>↗</a>
+		<a class="src" href={track.sourceUrl} target="_blank" rel="noopener noreferrer" title={linkTitle} aria-label={linkTitle}><Icon name="external" size={14} /></a>
 	{:else}
 		<span class="src"></span>
 	{/if}
-	<span class="stars" title={track.rating ? `${track.rating}/5` : ''}>{track.rating ? '★'.repeat(track.rating) : ''}</span>
-	<button class="add" title="Add to queue" onclick={() => player.enqueue(track)}>＋</button>
+	<span class="stars" title={track.rating ? `${track.rating}/5` : ''}>
+		{#each Array(track.rating ?? 0) as _, i (i)}<Icon name="star" size={11} />{/each}
+	</span>
+	<button class="add" title="Add to queue" aria-label="Add to queue" onclick={() => player.enqueue(track)}><Icon name="plus" size={16} /></button>
 	<span class="dur mono muted">{formatDuration(track.durationMs)}</span>
 </div>
 
@@ -48,19 +51,21 @@
 		border-radius: var(--radius-sm);
 	}
 	.src {
-		font-size: 0.9rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--text-faint);
 		text-decoration: none;
-		min-width: 1ch;
-		text-align: center;
+		min-width: 1.1rem;
 	}
 	a.src:hover {
 		color: var(--accent);
 	}
 	.stars {
+		display: inline-flex;
+		align-items: center;
+		gap: 1px;
 		color: var(--accent);
-		font-size: 0.72rem;
-		letter-spacing: 1px;
 		white-space: nowrap;
 	}
 	.row:hover {
@@ -122,11 +127,12 @@
 		font-size: 0.8rem;
 	}
 	.add {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		opacity: 0;
-		font-size: 1.1rem;
 		color: var(--text-dim);
 		width: 1.6rem;
-		text-align: center;
 	}
 	.row:hover .add {
 		opacity: 1;

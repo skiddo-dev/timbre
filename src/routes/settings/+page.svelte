@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import type { ScanStatus, LastfmStatus, Scrobble, AppleMusicStatus, AppleSyncResult } from '$lib/types';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -316,7 +317,7 @@
 		<button class="btn" onclick={rescan} disabled={scan.running || !musicDir}>
 			{scan.running ? 'Scanning…' : 'Rescan library'}
 		</button>
-		{#if saved}<span class="ok mono">saved ✓</span>{/if}
+		{#if saved}<span class="ok mono">saved <Icon name="check" size={12} /></span>{/if}
 	</div>
 
 	{#if scan.running}
@@ -355,7 +356,7 @@
 			{loud?.running ? 'Analyzing…' : 'Analyze loudness'}
 		</button>
 		{#if loud && !loud.running && loud.finishedAt}
-			<span class="ok mono">analyzed {loud.updated}/{loud.total} ✓</span>
+			<span class="ok mono">analyzed {loud.updated}/{loud.total} <Icon name="check" size={12} /></span>
 		{/if}
 	</div>
 	{#if loud?.running}
@@ -380,7 +381,7 @@
 			{tags?.running ? 'Analyzing…' : 'Analyze with AI'}
 		</button>
 		{#if tags && !tags.running && tags.finishedAt}
-			<span class="ok mono">tagged {tags.updated}/{tags.total} ✓</span>
+			<span class="ok mono">tagged {tags.updated}/{tags.total} <Icon name="check" size={12} /></span>
 		{/if}
 	</div>
 	{#if tags?.running}
@@ -600,6 +601,9 @@
 		gap: 0.6rem;
 	}
 	.ok {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
 		color: var(--good);
 		font-size: 0.8rem;
 	}

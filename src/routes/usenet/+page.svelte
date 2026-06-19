@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
 	import type { UsenetIndexer, UsenetDownload, UsenetResult, UsenetEngines } from '$lib/types';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -235,9 +236,9 @@
 						<span class="dl-title" title={d.title}>{d.title}</span>
 						<span class="dl-status mono">{STATUS_LABEL[d.status] ?? d.status}</span>
 						{#if ACTIVE.has(d.status)}
-							<button class="rm" onclick={() => cancel(d.id)} title="Cancel">✕</button>
+							<button class="rm" onclick={() => cancel(d.id)} title="Cancel" aria-label="Cancel download"><Icon name="x" size={14} /></button>
 						{:else}
-							<button class="rm" onclick={() => cancel(d.id)} title="Remove">✕</button>
+							<button class="rm" onclick={() => cancel(d.id)} title="Remove" aria-label="Remove download"><Icon name="x" size={14} /></button>
 						{/if}
 					</div>
 					<div class="bar"><div class="fill" style:width="{d.progress}%"></div></div>
@@ -266,7 +267,7 @@
 					<span class="ix-name">{ix.name}</span>
 					<span class="ix-url muted mono">{ix.url}{ix.hasKey ? ' · key set' : ''}</span>
 				</div>
-				<button class="rm" onclick={() => removeIndexer(ix.id)} title="Remove">✕</button>
+				<button class="rm" onclick={() => removeIndexer(ix.id)} title="Remove" aria-label="Remove indexer"><Icon name="x" size={14} /></button>
 			</li>
 		{:else}
 			<li class="muted hint">No indexers yet. Add a Newznab-compatible one below.</li>
@@ -483,11 +484,13 @@
 	}
 
 	.rm {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		flex: none;
 		background: none;
 		border: none;
 		color: var(--text-faint);
-		font-size: 0.85rem;
 	}
 	.rm:hover {
 		color: var(--bad);

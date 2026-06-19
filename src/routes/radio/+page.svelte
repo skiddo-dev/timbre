@@ -3,6 +3,7 @@
 	import type { RadioStation } from '$lib/types';
 	import { player } from '$lib/audio/player.svelte';
 	import { stationToTrack } from '$lib/stream';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: PageData } = $props();
 	// svelte-ignore state_referenced_locally
@@ -56,14 +57,14 @@
 	{#each stations as s (s.id)}
 		{@const playing = nowStreaming?.id === -s.id}
 		<div class="station" class:playing>
-			<button class="play" onclick={() => play(s)} title="Play">
-				<span class="dial">{playing && player.playing ? '❚❚' : '▶'}</span>
+			<button class="play" onclick={() => play(s)} title="Play" aria-label="Play">
+				<span class="dial"><Icon name={playing && player.playing ? 'pause' : 'play'} size={15} /></span>
 			</button>
 			<div class="meta">
 				<div class="name" title={s.name}>{s.name}</div>
 				{#if s.genre}<div class="genre muted">{s.genre}</div>{/if}
 			</div>
-			<button class="rm" onclick={() => remove(s.id)} title="Remove">✕</button>
+			<button class="rm" onclick={() => remove(s.id)} title="Remove" aria-label="Remove station"><Icon name="x" size={15} /></button>
 		</div>
 	{:else}
 		<p class="muted">No stations yet — add one below.</p>
@@ -142,10 +143,12 @@
 		font-size: 0.78rem;
 	}
 	.rm {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		background: none;
 		border: none;
 		color: var(--text-faint);
-		font-size: 0.85rem;
 	}
 	.rm:hover {
 		color: var(--bad);
